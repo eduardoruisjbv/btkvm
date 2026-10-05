@@ -1,0 +1,16 @@
+[Unit]
+Description=btkvm — teclado e mouse do PC no Mac via Bluetooth (Super+K)
+After=bluetooth.service
+Requires=bluetooth.service
+PartOf=bluetooth.service
+StartLimitIntervalSec=0
+
+[Service]
+# Usuário da sessão gráfica (o instalador preenche este valor).
+Environment=BTKVM_USER=@USUARIO@
+ExecStart=/usr/bin/python3 /usr/local/bin/btkvm
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=bluetooth.target

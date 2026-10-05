@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KVM Bluetooth (iniciar)
+Comment=Inicia/reinicia o btkvm: teclado e mouse do PC no Mac
+Exec=@HOME@/.local/bin/btkvm-iniciar
+Icon=input-keyboard
+Terminal=false
+Categories=Utility;
+Keywords=kvm;bluetooth;mac;teclado;mouse;

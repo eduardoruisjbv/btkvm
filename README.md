@@ -1,0 +1,89 @@
+# btkvm
+
+**Um teclado e um mouse para dois computadores, sem cabo, sem software no Mac.**
+
+O PC Linux se apresenta ao Mac como um teclado + mouse Bluetooth. **Super+K** alterna: o teclado e o mouse do PC passam a controlar o Mac e, no próximo Super+K, voltam para o PC. Além disso, o PC funciona como **caixa de som Bluetooth do Mac** (A2DP sink), então você ouve o áudio do Mac nas caixas ou fones do PC.
+
+- Nada para instalar no Mac: ele só vê um teclado e um mouse Bluetooth comuns.
+- Sem trocar de tela pela borda do mouse (bom para quem joga no PC).
+- O scroll, os botões, as teclas de mídia e a roda horizontal funcionam.
+- Se o Mac desconectar enquanto o KVM está ativo, o teclado e o mouse voltam sozinhos para o PC.
+
+> Testado em Nobara 44 (Fedora, GNOME Wayland, PipeWire, BlueZ 5.8x) com um adaptador Realtek RTL8821CE e um MacBook. Deve funcionar em qualquer distro com BlueZ, mas só esse ambiente foi verificado.
+
+## Como funciona
+
+| Peça | O que faz |
+|---|---|
+| `src/btkvm` | Serviço (root) que registra um perfil HID no BlueZ via D-Bus, abre os sockets L2CAP (PSM 17 e 19), captura teclado/mouse com `EVIOCGRAB` e envia relatórios HID ao Mac. Detecta Super+K sozinho. |
+| `systemd/btkvm.service` | Sobe o `btkvm` com o Bluetooth e reinicia se cair (sem limite de tentativas). |
+| `systemd/bluetooth.service.d/btkvm.conf` | Inicia o `bluetoothd` com `--noplugin=input,hostname`: o plugin `input` ocupa as portas HID e o `hostname` trocaria a classe do dispositivo. |
+| `/etc/bluetooth/main.conf` | O instalador define `Class = 0x0005C0` (teclado+mouse) e `Name` (com backup `.bak-btkvm`). |
+| `bin/btkvm-parear` | Deixa o PC visível por 3 min para o Mac parear. |
+| `bin/btkvm-iniciar` + `.desktop` | Atalho no menu de aplicativos para reiniciar o serviço se algo falhar. |
+| `bin/btkvm-audio` | Faz o PC conectar o perfil de áudio ao Mac, caso a opção de saída Bluetooth suma no Mac. |
+
+O mouse é enviado a ~125 Hz: o Bluetooth clássico não aguenta os 1000 Hz do mouse, então o movimento é acumulado e agrupado.
+
+## Instalação
+
+Dependências (Fedora):
+
+```bash
+sudo dnf install python3-dbus python3-evdev python3-gobject bluez
+```
+
+Instalar:
+
+```bash
+git clone https://github.com/eduardoruisjbv/btkvm.git
+cd btkvm
+./install.sh            # BTKVM_NAME="Meu PC" ./install.sh  para escolher o nome Bluetooth
+```
+
+O instalador pede a senha uma vez (via `pkexec`, ou `sudo` sem ambiente gráfico) e **reinicia o Bluetooth**: fones e outros dispositivos reconectam sozinhos em alguns segundos.
+
+### Primeiro uso
+
+1. `btkvm-parear` no PC (fica visível por 3 minutos).
+2. No Mac: **Ajustes do Sistema → Bluetooth →** nome do PC **→ Conectar**. Confirme o código se aparecer.
+3. **Super+K** para levar teclado e mouse ao Mac; **Super+K** de novo para voltar.
+
+O endereço do Mac é gravado na primeira conexão em `/var/lib/btkvm/host`.
+
+## Áudio do Mac no PC
+
+O PC já é um receptor A2DP pelo BlueZ + PipeWire. Depois de parear:
+
+- No Mac, abra o seletor de saída de som (Central de Controle → Som) e escolha o PC (tipo **Bluetooth**). O som do Mac sai pelas caixas/fones do PC.
+- Se a opção Bluetooth sumir do Mac, rode no PC: `btkvm-audio`. Ele conecta o perfil de áudio ao Mac registrado.
+
+### Opcional: AirPlay (shairport-sync)
+
+Em `extras/airplay/` há uma configuração para o PC também aparecer como destino AirPlay 2 (`shairport-sync` + `nqptp`, que o Fedora não empacota com AirPlay 2, então precisam ser compilados do GitHub). No ambiente testado o AirPlay aparecia no Mac, mas **o Bluetooth A2DP foi o que tocou de forma confiável**; trate o AirPlay como experimental. Portas a liberar no firewall, só para a rede local: `5353/udp`, `7000/tcp`, `319-320/udp`, `32768-60999 tcp+udp`.
+
+## Solução de problemas
+
+| Sintoma | O que fazer |
+|---|---|
+| Mac não reconecta depois de reset do adaptador Bluetooth | Atalho **KVM Bluetooth (iniciar)** no menu, ou `systemctl restart btkvm` |
+| Ver o que o serviço está fazendo | `journalctl -u btkvm -f` |
+| Mouse com leves engasgos | Esperado em Bluetooth clássico; veja `adiados por buffer cheio` no log |
+| Parear de novo | `btkvm-parear` e conectar pelo Mac |
+| Scroll não anda | Atualize para a v0.3.0 (corrige mouses que só emitem scroll de alta resolução) |
+
+## Desinstalar
+
+```bash
+./uninstall.sh   # remove tudo e restaura o main.conf do backup
+```
+
+## Limitações conhecidas
+
+- Sem área de transferência compartilhada: só teclado, mouse e mídia.
+- Um único Mac por vez.
+- O áudio do PC para o Mac não é coberto; só o caminho Mac → PC.
+
+## Licença
+
+MIT. Veja [LICENSE](LICENSE). Histórico em [CHANGELOG.md](CHANGELOG.md).

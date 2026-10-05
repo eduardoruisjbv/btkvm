@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Faz o PC conectar o perfil de áudio (A2DP sink) ao Mac, para ouvir o som do Mac no PC.
+# Normalmente o Mac já oferece "<nome do PC>" como saída Bluetooth; use isto se a opção sumir.
+#
+# Uso: btkvm-audio [endereço-bluetooth-do-dispositivo]
+# Sem argumento, usa o Mac registrado pelo btkvm em /var/lib/btkvm/host.
+set -euo pipefail
+
+A2DP_SINK_UUID="0000110a-0000-1000-8000-00805f9b34fb"
+host="${1:-$(cat /var/lib/btkvm/host 2>/dev/null || true)}"
+
+if [ -z "$host" ]; then
+  echo "Nenhum dispositivo conhecido. Pareie primeiro (btkvm-parear) ou passe o endereço: btkvm-audio AA:BB:CC:DD:EE:FF" >&2
+  exit 1
+fi
+
+bluetoothctl connect "$host" "$A2DP_SINK_UUID"

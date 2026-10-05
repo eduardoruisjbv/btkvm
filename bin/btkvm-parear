@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Deixa o PC visível por 3 minutos para o Mac parear com ele como teclado/mouse.
+nome="$(bluetoothctl show | sed -n 's/^[[:space:]]*Name: //p' | head -1)"
+bluetoothctl pairable on >/dev/null
+bluetoothctl discoverable-timeout 180 >/dev/null
+bluetoothctl discoverable on >/dev/null
+echo "PC visível por 3 min. No Mac: Ajustes > Bluetooth > '${nome:-este PC}' > Conectar."
+echo "Se aparecer um código no PC ou no Mac, confirme."

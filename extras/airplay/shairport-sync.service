@@ -1,0 +1,14 @@
+[Unit]
+Description=Receptor AirPlay (shairport-sync) na sessão do usuário
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire.service
+
+[Service]
+# Espera o nqptp (serviço de sistema) estar ouvindo; sem ele o shairport cai no AirPlay 1 (porta 5000).
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do ss -Hlun "sport = :319" | grep -q . && exit 0; sleep 1; done; exit 0'
+ExecStart=/usr/local/bin/shairport-sync -c %h/.config/shairport-sync/shairport-sync.conf
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
