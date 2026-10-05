@@ -2,6 +2,11 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e versionamento semântico.
 
+## [Não lançado]
+
+### Adicionado
+- `docs/PROTOCOLO.md`: especificação (rascunho) do modo **dual** LAN + Bluetooth com agente no Mac — três camadas (UDP, RFCOMM, HID de reserva), contadores cumulativos, chave por sessão via Bluetooth e telemetria. Ainda sem código; o modo HID atual não muda.
+
 ## [0.3.1] - 2026-10-05
 
 ### Corrigido
