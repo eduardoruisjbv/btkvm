@@ -368,6 +368,17 @@ class KVM:
     def aceitar(self, ouvinte):
         s, info = ouvinte.accept()
         endereco = info[0]
+        try:
+            registrado = open(ARQ_HOST).read().strip()
+        except OSError:
+            registrado = ""
+        # Só o host registrado vale: um celular ou outro dispositivo pareado também abre as
+        # portas HID e, antes, acabava sobrescrevendo o endereço do Mac.
+        if registrado and endereco.upper() != registrado.upper():
+            log(f"recusado {endereco}: o teclado/mouse é do host {registrado} "
+                f"(para trocar de host, apague {ARQ_HOST} e pareie de novo)")
+            s.close()
+            return
         if ouvinte is self.ouvir_ctrl:
             if self.ctrl:
                 self.ctrl.close()

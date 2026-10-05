@@ -2,6 +2,11 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e versionamento semântico.
 
+## [0.3.1] - 2026-10-05
+
+### Corrigido
+- **O teclado e o mouse podiam ser enviados ao dispositivo errado.** Qualquer aparelho pareado que abrisse as portas HID (PSM 17/19), como um iPhone, era tratado como "o Mac" e sobrescrevia `/var/lib/btkvm/host`; o Super+K passava a mirar o celular. Agora só o host registrado é aceito; os outros são recusados e aparecem no log (`recusado <endereço>`). Para registrar outro host, apague `/var/lib/btkvm/host` e pareie de novo.
+
 ## [0.3.0] - 2026-10-05
 
 Primeira versão pública.
