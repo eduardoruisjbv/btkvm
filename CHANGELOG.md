@@ -1,56 +1,56 @@
 # Changelog
 
-Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e versionamento semântico.
+Based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
-## [Não lançado]
+## [Unreleased]
 
-### Adicionado
-- `docs/PROTOCOLO.md`: especificação (rascunho) do modo **dual** LAN + Bluetooth com agente no Mac — três camadas (UDP, RFCOMM, HID de reserva), contadores cumulativos, chave por sessão via Bluetooth e telemetria. Ainda sem código; o modo HID atual não muda.
+### Added
+- No code yet; the current HID mode remains unchanged.
 
 ## [0.3.1] - 2026-10-05
 
-### Corrigido
-- **O teclado e o mouse podiam ser enviados ao dispositivo errado.** Qualquer aparelho pareado que abrisse as portas HID (PSM 17/19), como um iPhone, era tratado como "o Mac" e sobrescrevia `/var/lib/btkvm/host`; o Super+K passava a mirar o celular. Agora só o host registrado é aceito; os outros são recusados e aparecem no log (`recusado <endereço>`). Para registrar outro host, apague `/var/lib/btkvm/host` e pareie de novo.
+### Fixed
+- **Keyboard and mouse input could be sent to the wrong device.** Any paired device that opened the HID ports (PSM 17/19), such as an iPhone, was treated as "the Mac" and overwrote `/var/lib/btkvm/host`; Super+K then targeted the phone. Only the registered host is now accepted; other devices are rejected and logged (`rejected <address>`). To register a different host, remove `/var/lib/btkvm/host` and pair again.
 
 ## [0.3.0] - 2026-10-05
 
-Primeira versão pública.
+First public release.
 
-### Corrigido
-- **Scroll do mouse não funcionava no Mac.** Mouses acessados por camadas como o OpenLogi emitem a roda só como `REL_WHEEL_HI_RES` (120 unidades = 1 clique) e o `btkvm` só lia `REL_WHEEL`. Agora a roda de alta resolução é lida com acumulador fracionário (vertical e horizontal), e `REL_WHEEL` só é usado em dispositivos sem `HI_RES`, evitando contagem dupla.
+### Fixed
+- **Mouse scrolling did not work on the Mac.** Mice accessed through layers such as OpenLogi report the wheel only as `REL_WHEEL_HI_RES` (120 units = 1 click), while `btkvm` read only `REL_WHEEL`. High-resolution scrolling is now read with a fractional accumulator (vertical and horizontal); `REL_WHEEL` is used only on devices without `HI_RES`, avoiding double counting.
 
-### Adicionado
-- `install.sh` e `uninstall.sh`: instalação completa com `pkexec`/`sudo`, backup e restauração do `/etc/bluetooth/main.conf`, detecção do caminho do `bluetoothd`.
-- `bin/btkvm-audio`: reconecta o perfil de áudio (A2DP sink) ao Mac quando a saída Bluetooth some no seletor do macOS.
-- Usuário da sessão configurável (`BTKVM_USER`, preenchido pelo instalador; sem isso usa a sessão ativa do `loginctl`). Antes estava fixo no código.
-- Documentação (README), licença MIT e configuração opcional de AirPlay em `extras/airplay/`.
+### Added
+- `install.sh` and `uninstall.sh`: complete installation with `pkexec`/`sudo`, backup and restoration of `/etc/bluetooth/main.conf`, and detection of the `bluetoothd` path.
+- `bin/btkvm-audio`: reconnects the A2DP sink profile to the Mac if Bluetooth audio disappears from the macOS output selector.
+- Configurable session user (`BTKVM_USER`, set by the installer; otherwise uses the active `loginctl` session). It was previously hard-coded.
+- Documentation (README), MIT license, and optional AirPlay configuration in `extras/airplay/`.
 
-### Alterado
-- O nome do serviço HID anunciado por SDP passou a ser genérico (`btkvm Teclado e Mouse`).
+### Changed
+- The HID service name advertised through SDP is now generic (`btkvm Keyboard and Mouse`).
 
 ## [0.2.1] - 2026-10-04
 
-### Corrigido
-- **Queda do serviço após reset do adaptador.** O kernel reinicializava o adaptador RTL8821CE (`hci0` → `hci1`), o socket HCI dava `BrokenPipe` e o serviço esgotava o limite de reinícios do systemd. Agora o `btkvm` descobre o `hciN` sozinho (`achar_adaptador`) e a unit usa `StartLimitIntervalSec=0`.
+### Fixed
+- **The service stopped after an adapter reset.** The kernel reinitialized the RTL8821CE adapter (`hci0` → `hci1`), the HCI socket raised `BrokenPipe`, and the service exhausted systemd's restart limit. `btkvm` now discovers the `hciN` adapter itself (`achar_adaptador`), and the unit sets `StartLimitIntervalSec=0`.
 
-### Adicionado
-- Atalho **KVM Bluetooth (iniciar)** no menu de aplicativos, para reiniciar o serviço quando o Mac não reconecta.
+### Added
+- **KVM Bluetooth (start)** application-menu shortcut to restart the service when the Mac does not reconnect.
 
 ## [0.2.0] - 2026-10-03
 
-### Adicionado
-- **`btkvm`: o PC vira teclado + mouse Bluetooth do Mac.** Perfil HID registrado via D-Bus (`ProfileManager1`), sockets L2CAP nos PSM 17/19, captura exclusiva (`EVIOCGRAB`) dos dispositivos de entrada, relatórios de teclado, mouse (16 bits, roda vertical e horizontal) e mídia.
-- Super+K detectado pelo próprio serviço; só captura depois que as teclas são soltas, para não prender tecla pressionada.
-- Retorno automático do teclado e do mouse ao PC se o Mac desconectar.
-- `btkvm-parear` e ajustes do BlueZ (`--noplugin=input,hostname`, `Class = 0x0005C0`).
+### Added
+- **`btkvm`: the PC acts as the Mac's Bluetooth keyboard and mouse.** Registers a HID profile through D-Bus (`ProfileManager1`), opens L2CAP sockets on PSM 17/19, exclusively captures input devices (`EVIOCGRAB`), and sends keyboard, mouse (16-bit, vertical and horizontal scroll), and media reports.
+- The service detects Super+K itself and captures input only after the keys are released, preventing a held key.
+- Keyboard and mouse input automatically return to the PC if the Mac disconnects.
+- `btkvm-parear` and BlueZ settings (`--noplugin=input,hostname`, `Class = 0x0005C0`).
 
-### Removido
-- Input Leap como mecanismo de KVM (trocava de tela pela borda do mouse, indesejado para jogos, e era menos consistente).
+### Removed
+- Input Leap as the KVM mechanism (it switched desktops at the screen edge, which is undesirable for gaming and less consistent).
 
 ## [0.1.0] - 2026-10-02
 
-Protótipo, não distribuído.
+Prototype, not distributed.
 
-### Adicionado
-- KVM por rede com Input Leap (PC servidor, Mac cliente).
-- Receptor AirPlay 2 no PC com `shairport-sync` + `nqptp` + `avahi`, saída PipeWire, regras de firewall para a rede local e correção de corrida na inicialização (o `shairport-sync` esperava o `nqptp` para não cair no AirPlay 1).
+### Added
+- Network KVM with Input Leap (PC as server, Mac as client).
+- AirPlay 2 receiver on the PC using `shairport-sync`, `nqptp`, and `avahi`, with PipeWire output and local-network firewall rules. Fixed a startup race where `shairport-sync` could start before `nqptp` and fall back to AirPlay 1.

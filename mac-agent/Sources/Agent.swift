@@ -111,17 +111,17 @@ final class Agent: NSObject, IOBluetoothRFCOMMChannelDelegate, IOBluetoothDevice
     func tick() {
         let now = ProcessInfo.processInfo.systemUptime
         if !canInject {
-            if !blocked { disable(sendBye: true); needsResume = true; log("Injeção indisponível: reserva HID") }
+            if !blocked { disable(sendBye: true); needsResume = true; log("Input injection unavailable: falling back to HID") }
             blocked = true
         } else { blocked = false }
-        if enabled && now - lastAuthenticated > 2 { disable(sendBye: true); needsResume = true; log("Vigia: teclas soltas após 2s") }
+        if enabled && now - lastAuthenticated > 2 { disable(sendBye: true); needsResume = true; log("Watchdog: released keys after 2 seconds") }
         if enabled && !blocked { input.repeatTick(now) }
         if discovering && now > discoverUntil { discovering = false; device = nil }
         if channel == nil && !discovering && now >= retryAt && !sleeping { discover() }
         if now - lastTelemetry >= 5 {
             let wifi = CWWiFiClient.shared().interface()
             let band = wifi?.wlanChannel()?.channelBand.rawValue
-            log("telemetria: agente=\(enabled), BT=\(channel != nil), wifi_rssi=\(wifi?.rssiValue() ?? 0), wifi_band=\(band.map { String($0) } ?? "indisponível"), rx=\(session?.stats.description ?? "sem sessão")")
+            log("telemetry: agent=\(enabled), BT=\(channel != nil), wifi_rssi=\(wifi?.rssiValue() ?? 0), wifi_band=\(band.map { String($0) } ?? "unavailable"), rx=\(session?.stats.description ?? "no session")")
             lastTelemetry = now
         }
         flush()
@@ -236,7 +236,7 @@ final class Agent: NSObject, IOBluetoothRFCOMMChannelDelegate, IOBluetoothDevice
         accept.append(privateKey.publicKey.rawRepresentation); accept.append(nonce)
         accept.put(UInt8(addresses.count)); accept.put(udpPort)
         for address in addresses { accept.append(address) }
-        enqueue(accept); log("Sessão X25519 \(id); injeção espera MODE + SNAPSHOT")
+        enqueue(accept); log("X25519 session \(id); injection awaits MODE + SNAPSHOT")
     }
     func readUDP() {
         for _ in 0 ..< 32 {
@@ -292,7 +292,7 @@ final class Agent: NSObject, IOBluetoothRFCOMMChannelDelegate, IOBluetoothDevice
                     input.baseline(snapshot.mouse); lastMouse = snapshot.mouse; nextEvent = snapshot.nextEvent
                     pointerSample = snapshot.mouse.sample
                     eventBuffer.removeAll(); input.reconcile(snapshot.pressed); enabled = true; prepared = false
-                    log("AGENTE época \(snapshot.epoch)")
+                    log("AGENT epoch \(snapshot.epoch)")
                 }
                 if enabled { sendBoth(0x14, Data([snapshot.epoch])) }
             } else if enabled {

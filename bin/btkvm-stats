@@ -8,7 +8,7 @@ from pathlib import Path
 try:
     stats = json.loads(Path("/run/btkvm-dual.json").read_text())
 except (OSError, ValueError):
-    sys.exit("Telemetria dual indisponível. Veja modo=dual em /etc/btkvm.conf e journalctl -u btkvm.")
+    sys.exit("Dual-mode telemetry is unavailable. Check mode=dual in /etc/btkvm.conf and journalctl -u btkvm.")
 age = time.monotonic() - stats.get("updated_monotonic", 0)
 stats["report_age_s"] = round(age, 1)
 stats["stale"] = age < 0 or age > 15

@@ -1,9 +1,9 @@
 #!/bin/bash
-# Reinicia o serviço btkvm (KVM Bluetooth PC -> Mac). Usado pelo atalho do menu.
+# Restart the btkvm service (Bluetooth KVM, PC -> Mac). Used by the application-menu shortcut.
 pkexec bash -c 'systemctl reset-failed btkvm.service; systemctl restart btkvm.service'
 sleep 2
 if systemctl is-active --quiet btkvm.service; then
-  notify-send -i input-keyboard "KVM Bluetooth" "btkvm ativo. Super+K alterna entre PC e Mac."
+  notify-send -i input-keyboard "Bluetooth KVM" "btkvm is active. Super+K switches between the PC and Mac."
 else
-  notify-send -u critical -i dialog-error "KVM Bluetooth" "btkvm não iniciou. Veja: journalctl -u btkvm -b"
+  notify-send -u critical -i dialog-error "Bluetooth KVM" "btkvm did not start. See: journalctl -u btkvm -b"
 fi

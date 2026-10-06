@@ -1,93 +1,67 @@
 # btkvm-agent (macOS)
 
-Fontes Swift do receptor opcional do modo dual. **Ainda não compiladas ou
-validadas no macOS nesta etapa.** O PC continua usando HID por padrão.
+Swift source for the optional dual-mode receiver. **It has not yet been compiled or validated on macOS.** The PC continues to use HID by default.
 
-## Instalar no Mac
+## Install on the Mac
 
-Requer macOS 11+ e Command Line Tools (`xcode-select --install`). Copie este
-repositório para o Mac, mantenha o pareamento HID normal com o PC e execute:
+Requires macOS 11+ and Command Line Tools (`xcode-select --install`). Copy this repository to the Mac, keep normal HID pairing with the PC, then run:
 
 ```bash
 cd mac-agent
 ./install.sh
 ```
 
-O instalador compila uma aplicação em `~/Applications/btkvm-agent.app` e registra
-um LaunchAgent da sessão de usuário. Por padrão a assinatura é ad hoc. Para
-manter uma identidade de assinatura estável em recompilações, use a mesma
-identidade de desenvolvimento:
+The installer builds an app at `~/Applications/btkvm-agent.app` and registers a user-session LaunchAgent. The default signature is ad hoc. To keep a stable signing identity across rebuilds, use the same development identity:
 
 ```bash
-BTKVM_SIGN_IDENTITY='Apple Development: Nome (ID)' ./install.sh
+BTKVM_SIGN_IDENTITY='Apple Development: Name (ID)' ./install.sh
 ```
 
-O caminho e o bundle id são fixos. A assinatura ad hoc pode exigir conceder
-permissões novamente depois de recompilar. Nenhuma chave de sessão fica no disco.
+The path and bundle ID are fixed. An ad hoc signature may require you to grant permissions again after rebuilding. No session key is stored on disk.
 
-Conceda **Acessibilidade**, **Bluetooth** e **Rede local** à aplicação nos Ajustes
-do Sistema. O agente procura nos dispositivos pareados o serviço próprio do
-btkvm; ele anuncia seus IPv4 e sua porta UDP pelo Bluetooth. No PC, instale com
-`./install.sh --dual` e libere `45873/udp` para o Mac na LAN. Sem IPv4, o caminho
-RFCOMM permanece disponível.
+Grant the app **Accessibility**, **Bluetooth**, and **Local Network** permissions in System Settings. The agent searches paired devices for the dedicated btkvm service; it advertises its IPv4 address and UDP port over Bluetooth. On the PC, install with `./install.sh --dual` and allow `45873/udp` through the firewall for the Mac on the LAN. Without IPv4, RFCOMM remains available.
 
-Para executar diretamente com um PC específico, primeiro pare o LaunchAgent:
+To run directly with a specific PC, first stop the LaunchAgent:
 
 ```bash
 launchctl bootout gui/$(id -u)/io.github.eduardoruisjbv.btkvm-agent
 ~/Applications/btkvm-agent.app/Contents/MacOS/btkvm-agent --host AA-BB-CC-DD-EE-FF
 ```
 
-Não execute duas instâncias do agente. Para voltar ao início automático:
+Do not run two agent instances. To resume automatic startup:
 
 ```bash
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.eduardoruisjbv.btkvm-agent.plist
 ```
 
-## Observar o HID atual
+## Observe current HID
 
-Pare o LaunchAgent e mantenha `modo = hid` no PC. Execute:
+Stop the LaunchAgent and keep `mode = hid` on the PC. Run:
 
 ```bash
 ~/Applications/btkvm-agent.app/Contents/MacOS/btkvm-agent --observe
 ```
 
-Esse modo requer **Monitoramento de Entrada** e registra p95/p99 dos intervalos
-de movimento observados, sem injeção nem conexão de rede. Pausas acima de 100ms
-são excluídas da distribuição. Não mede RTT nem distingue HID de outros mouses;
-use somente o mouse do PC durante a observação. Log: `~/Library/Logs/btkvm-agent.log`.
+This mode requires **Input Monitoring** and records p95/p99 intervals between observed movement events without injecting input or opening a network connection. Pauses over 100 ms are excluded from the distribution. It does not measure RTT or distinguish HID from other mice; use only the PC's mouse during observation. Log: `~/Library/Logs/btkvm-agent.log`.
 
-## Comportamento implementado
+## Implemented behavior
 
-- RFCOMM pelo UUID próprio, consultado por SDP, com reconexão; UDP não bloqueante.
-- X25519/HKDF-SHA256, ChaCha20-Poly1305, replay de 128 contadores por canal.
-- Mouse cumulativo, eventos de tecla/botão ordenados com ACK e snapshots.
-- Troca de época confirmada antes de injetar o estado inicial; watchdog de 2s.
-- CGEvent para teclado, ponteiro, arraste e rodas; eventos de sistema para mídia.
-- Repetição de teclas, modificadores e posição dos cliques; limite aos monitores ativos.
-- Quando a sessão não permite injeção, deixa de confirmar heartbeats para acionar
-  o HID no PC. Suspensão e troca de usuário soltam as teclas.
+- RFCOMM through a dedicated UUID discovered by SDP, with reconnection; nonblocking UDP.
+- X25519/HKDF-SHA256, ChaCha20-Poly1305, and replay protection over 128 counters per channel.
+- Cumulative mouse state, ordered key/button events with ACKs, and snapshots.
+- Confirmed epoch change before injecting the initial state; 2-second watchdog.
+- CGEvent for keyboard, pointer, dragging, and scroll wheels; system events for media keys.
+- Key repeat, modifiers, click positions, and clamping to active displays.
+- When the session disallows injection, the agent stops acknowledging heartbeats so HID takes over on the PC. Sleep and user switching release pressed keys.
 
-A queda de um link permite continuar no outro. Uma reconexão Bluetooth começa
-uma nova sessão e faz uma transição controlada pelo HID. O áudio usa A2DP e não
-participa do agente.
+If one link drops, operation can continue over the other. A Bluetooth reconnection starts a new session and performs a controlled transition through HID. Audio uses A2DP and is independent of the agent.
 
-## Validação pendente no Mac
+## Mac validation still pending
 
-A compilação depende das assinaturas importadas pelo SDK do macOS. Ainda faltam
-confirmação de compilação, permissões, pareamento/criptografia RFCOMM, keycodes
-ABNT2/ISO, mídia, clique duplo, scroll, monitores múltiplos, bloqueio/desbloqueio,
-sleep/wake e falhas independentes dos links durante áudio A2DP. Usages sem mapa
-(como algumas teclas F21–F24, Pause/Scroll Lock e Stop de mídia) são registrados
-no log. A velocidade do scroll e o limiar de clique duplo usam valores iniciais
-que devem ser ajustados com uso real.
+Compilation depends on API signatures imported from the macOS SDK. Still to confirm: build, permissions, RFCOMM pairing/encryption, ABNT2/ISO keycodes, media keys, double-click, scrolling, multiple displays, lock/unlock, sleep/wake, and independent link failures during A2DP audio. Unmapped usages (such as some F21–F24 keys, Pause/Scroll Lock, and media Stop) are logged. Scroll speed and double-click thresholds use initial values that should be tuned through real use.
 
-O sinal opcional `CGSSessionScreenIsLocked` não é uma API pública. A detecção
-combina também notificações da sessão, disponibilidade do console e entrada
-segura; alguns aplicativos com campos de senha podem provocar uso do HID.
+The optional `CGSSessionScreenIsLocked` signal is not a public API. Detection also combines session notifications, console availability, and secure input; some apps with password fields may cause the HID path to be used.
 
-Referências das APIs: [BlueZ Profile1](https://bluez.readthedocs.io/en/latest/profile-api/),
-[IOBluetooth RFCOMM](https://developer.apple.com/documentation/iobluetooth/iobluetoothrfcommchannel),
-[CGEvent](https://developer.apple.com/documentation/coregraphics/cgevent).
+API references: [BlueZ Profile1](https://bluez.readthedocs.io/en/latest/profile-api/), [IOBluetooth RFCOMM](https://developer.apple.com/documentation/iobluetooth/iobluetoothrfcommchannel), and [CGEvent](https://developer.apple.com/documentation/coregraphics/cgevent).
 
-Para remover o agente: `./uninstall.sh`. O pareamento HID continua no macOS.
+Remove the agent with `./uninstall.sh`. HID pairing remains on macOS.

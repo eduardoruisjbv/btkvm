@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove o btkvm e devolve o BlueZ ao estado original (usa o backup do main.conf).
+# Remove btkvm and restores BlueZ to its original state (using the main.conf backup).
 set -euo pipefail
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -22,4 +22,4 @@ fi
 
 rm -f "$HOME/.local/bin/btkvm-iniciar" "$HOME/.local/share/applications/btkvm-iniciar.desktop"
 if command -v pkexec >/dev/null; then pkexec "$AQUI/uninstall.sh" --root; else sudo "$AQUI/uninstall.sh" --root; fi
-echo "btkvm removido. O pareamento com o Mac continua guardado no BlueZ (bluetoothctl remove <endereço> para apagar)."
+echo "btkvm removed. The Mac pairing remains stored in BlueZ (run bluetoothctl remove <address> to delete it)."

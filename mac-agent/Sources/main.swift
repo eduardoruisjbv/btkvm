@@ -53,7 +53,7 @@ final class Observer {
                 log("observe 5s: n=\(samples.count), p95=\(p95)ms, p99=\(p99)ms; sem RTT")
             }
         }
-        log("--observe: intervalos do mouse recebidos pelo macOS, sem injeção nem rede; pausas >100ms excluídas")
+        log("--observe: mouse event intervals received by macOS, without injection or networking; pauses >100ms excluded")
     }
 }
 
@@ -61,7 +61,7 @@ let arguments = Array(CommandLine.arguments.dropFirst())
 if arguments.contains("--help") { print("btkvm-agent [--host AA-BB-CC-DD-EE-FF] | --observe"); exit(0) }
 var host: String?
 if let index = arguments.firstIndex(of: "--host") {
-    guard index + 1 < arguments.count else { log("Falta endereço após --host"); exit(1) }
+    guard index + 1 < arguments.count else { log("Missing address after --host"); exit(1) }
     host = arguments[index + 1]
 }
 _ = NSApplication.shared
@@ -73,7 +73,7 @@ else {
     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     if !AXIsProcessTrustedWithOptions(options) { log("Conceda Acessibilidade ao btkvm-agent; usando HID enquanto isso") }
     do { agent = try Agent(host: host, log: log) }
-    catch { log("Não foi possível iniciar: \(error)"); exit(1) }
+    catch { log("Could not start: \(error)"); exit(1) }
 }
 var signals = [DispatchSourceSignal]()
 for value in [SIGINT, SIGTERM] {

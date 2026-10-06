@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Instala o btkvm (teclado/mouse do PC no Mac via Bluetooth) e prepara o áudio Mac -> PC.
+# Install btkvm (PC keyboard/mouse on Mac over Bluetooth) and prepare Mac-to-PC audio.
 #
-# Uso:   ./install.sh                 (pede a senha via pkexec/sudo só para a parte de sistema)
-#        ./install.sh --dual          (modo opcional LAN + Bluetooth, requer agente no Mac)
-# Opções por variável de ambiente:
-#   BTKVM_NAME=Nome   nome Bluetooth do PC (padrão: hostname)
+# Usage: ./install.sh                 (prompts for a password via pkexec/sudo for system setup only)
+#        ./install.sh --dual          (optional LAN + Bluetooth mode; requires the Mac agent)
+# Environment variable options:
+#   BTKVM_NAME=Name   PC Bluetooth name (default: hostname)
 set -euo pipefail
 
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +17,7 @@ if [ "${1:-}" = "--root" ]; then
   for p in /usr/libexec/bluetooth/bluetoothd /usr/lib/bluetooth/bluetoothd; do
     [ -x "$p" ] && bluetoothd="$p" && break
   done
-  [ -n "$bluetoothd" ] || { echo "bluetoothd não encontrado (instale o BlueZ)." >&2; exit 1; }
+  [ -n "$bluetoothd" ] || { echo "bluetoothd not found (install BlueZ)." >&2; exit 1; }
 
   install -m755 "$AQUI/src/btkvm" /usr/local/bin/btkvm
   install -m755 "$AQUI/bin/btkvm-parear" /usr/local/bin/btkvm-parear
@@ -39,7 +39,7 @@ if [ "${1:-}" = "--root" ]; then
   sed "s|/usr/libexec/bluetooth/bluetoothd|$bluetoothd|" \
     "$AQUI/systemd/bluetooth.service.d/btkvm.conf" > /etc/systemd/system/bluetooth.service.d/btkvm.conf
 
-  # /etc/bluetooth/main.conf: classe "teclado+mouse" e nome do PC (com backup, idempotente)
+  # /etc/bluetooth/main.conf: "keyboard+mouse" class and PC name (backed up, idempotently)
   [ -f /etc/bluetooth/main.conf.bak-btkvm ] || cp /etc/bluetooth/main.conf /etc/bluetooth/main.conf.bak-btkvm
   python3 - "$NOME" <<'PY'
 import re, sys
@@ -74,30 +74,30 @@ PY
   exit 0
 fi
 
-# ---------------------------------------------------------- parte do usuário
+# ---------------------------------------------------------- user setup
 USUARIO="${SUDO_USER:-$USER}"
 NOME="${BTKVM_NAME:-$(hostname -s)}"
 MODO=hid
 case "${1:-}" in
   --dual) MODO=dual ;;
   "") ;;
-  *) echo "Uso: $0 [--dual]" >&2; exit 1 ;;
+  *) echo "Usage: $0 [--dual]" >&2; exit 1 ;;
 esac
 
 faltam=()
-python3 - <<'PY' 2>/dev/null || faltam+=("python3-dbus python3-evdev python3-gobject (módulos dbus, evdev, gi)")
+python3 - <<'PY' 2>/dev/null || faltam+=("python3-dbus python3-evdev python3-gobject (dbus, evdev, gi modules)")
 import dbus, evdev, gi
 PY
 if [ "$MODO" = dual ]; then
-  python3 -c 'import cryptography' 2>/dev/null || faltam+=("python3-cryptography (modo dual)")
+  python3 -c 'import cryptography' 2>/dev/null || faltam+=("python3-cryptography (dual mode)")
 fi
 command -v bluetoothctl >/dev/null || faltam+=("bluez")
-command -v pkexec >/dev/null || command -v sudo >/dev/null || faltam+=("pkexec ou sudo")
+command -v pkexec >/dev/null || command -v sudo >/dev/null || faltam+=("pkexec or sudo")
 if [ "${#faltam[@]}" -gt 0 ]; then
-  echo "Dependências ausentes:" >&2
+  echo "Missing dependencies:" >&2
   printf '  - %s\n' "${faltam[@]}" >&2
   echo "Fedora: sudo dnf install python3-dbus python3-evdev python3-gobject bluez" >&2
-  [ "$MODO" != dual ] || echo "Modo dual: sudo dnf install python3-cryptography" >&2
+  [ "$MODO" != dual ] || echo "Dual mode: sudo dnf install python3-cryptography" >&2
   exit 1
 fi
 
@@ -105,8 +105,8 @@ mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications"
 install -m755 "$AQUI/bin/btkvm-iniciar" "$HOME/.local/bin/btkvm-iniciar"
 sed "s|@HOME@|$HOME|" "$AQUI/desktop/btkvm-iniciar.desktop" > "$HOME/.local/share/applications/btkvm-iniciar.desktop"
 
-echo "Instalando a parte de sistema (vai pedir a senha). O Bluetooth será reiniciado:"
-echo "fones e outros dispositivos reconectam sozinhos em alguns segundos."
+echo "Installing system components (you will be prompted for your password). Bluetooth will restart:"
+echo "Headphones and other devices should reconnect automatically within a few seconds."
 if command -v pkexec >/dev/null; then
   pkexec "$AQUI/install.sh" --root "$USUARIO" "$NOME" "$MODO"
 else
@@ -115,13 +115,13 @@ fi
 
 cat <<EOF
 
-Pronto. Próximos passos:
-  1. btkvm-parear            (deixa o PC visível por 3 min)
-  2. No Mac: Ajustes > Bluetooth > "$NOME" > Conectar
-  3. Super+K alterna teclado/mouse entre PC e Mac.
-  4. Áudio do Mac no PC: no Mac, escolha "$NOME" como saída de som Bluetooth.
+Done. Next steps:
+  1. btkvm-parear            (makes the PC discoverable for 3 minutes)
+  2. On the Mac: System Settings > Bluetooth > "$NOME" > Connect
+  3. Press Super+K to switch the keyboard/mouse between the PC and Mac.
+  4. Mac audio on the PC: on the Mac, choose "$NOME" as the Bluetooth audio output.
 EOF
 if [ "$MODO" = dual ]; then
-  echo "Modo dual: compile/instale mac-agent no Mac e libere 45873/udp para o Mac na LAN."
-  echo "Detalhes: mac-agent/README.md. Sem agente, o modo usa o HID conectado como reserva."
+  echo "Dual mode: build/install mac-agent on the Mac and allow 45873/udp from the Mac on the LAN."
+  echo "Details: mac-agent/README.md. Without the agent, the mode uses connected HID as a fallback."
 fi

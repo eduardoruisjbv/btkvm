@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""btkvm — o PC vira um teclado + mouse Bluetooth do Mac.
+"""btkvm — the PC becomes the Mac's Bluetooth keyboard and mouse.
 
-Super+K alterna: o teclado e o mouse do PC passam a ir para o Mac (o PC
-fica "parado") e, no próximo Super+K, voltam para o PC.
+Super+K switches keyboard and mouse input from the PC to the Mac; press it
+again to return input to the PC.
 
-Roda como root (serviço systemd btkvm.service): precisa das portas L2CAP 17/19
-(HID) e de acesso exclusivo (EVIOCGRAB) aos dispositivos em /dev/input.
+Runs as root (systemd service btkvm.service): requires L2CAP ports 17/19 (HID)
+and exclusive access (EVIOCGRAB) to devices in /dev/input.
 """
 import collections
 import fcntl
@@ -26,8 +26,8 @@ import evdev
 from evdev import ecodes as e
 from gi.repository import GLib
 
-# Usuário da sessão gráfica (usado para falar com o D-Bus de sessão). Defina BTKVM_USER
-# no serviço; sem isso, usa o dono da sessão ativa do loginctl.
+# Graphical session user (used to access the session D-Bus). Set BTKVM_USER
+# in the service; otherwise the owner of the active loginctl session is used.
 def _usuario():
     nome = os.environ.get("BTKVM_USER")
     if not nome:
@@ -43,12 +43,12 @@ def _usuario():
 
 USUARIO = _usuario()
 UID = pwd.getpwnam(USUARIO).pw_uid
-ARQ_HOST = "/var/lib/btkvm/host"  # endereço do Mac, gravado na 1ª conexão
+ARQ_HOST = "/var/lib/btkvm/host"  # Mac address, saved on the first connection
 PSM_CTRL, PSM_INTR = 17, 19
-MOUSE_INTERVALO = 0.008  # ~125 Hz: o Bluetooth não aguenta os 1000 Hz do mouse
+MOUSE_INTERVALO = 0.008  # ~125 Hz: Bluetooth cannot sustain a 1000 Hz mouse
 
-# ---------------------------------------------------------------- descritor HID
-# Report 1 = teclado, 2 = mouse (X/Y 16 bits, roda, roda horizontal), 3 = mídia.
+# ---------------------------------------------------------------- HID descriptor
+# Report 1 = keyboard, 2 = mouse (16-bit X/Y, wheel, horizontal wheel), 3 = media.
 DESCRITOR = bytes.fromhex((
     # teclado
     "05010906a101 8501 0507 19e0 29e7 1500 2501 7501 9508 8102"
@@ -57,7 +57,7 @@ DESCRITOR = bytes.fromhex((
     " 05010902a101 8502 0901 a100 0509 1901 2905 1500 2501 9505 7501 8102"
     " 9501 7503 8101 0501 0930 0931 160180 26ff7f 7510 9502 8106"
     " 0938 1581 257f 7508 9501 8106 050c 0a3802 1581 257f 7508 9501 8106 c0 c0"
-    # controle de mídia
+    # media controls
     " 050c 0901 a101 8503 1500 26ff03 1900 2aff03 7510 9501 8100 c0"
 ).replace(" ", ""))
 
@@ -103,7 +103,7 @@ REGISTRO_SDP = f"""<?xml version="1.0" encoding="UTF-8" ?>
 </record>
 """
 
-# ------------------------------------------------------- tabela evdev → HID
+# ------------------------------------------------------- evdev → HID table
 MODIFICADORES = {
     e.KEY_LEFTCTRL: 0x01, e.KEY_LEFTSHIFT: 0x02, e.KEY_LEFTALT: 0x04, e.KEY_LEFTMETA: 0x08,
     e.KEY_RIGHTCTRL: 0x10, e.KEY_RIGHTSHIFT: 0x20, e.KEY_RIGHTALT: 0x40, e.KEY_RIGHTMETA: 0x80,
@@ -181,34 +181,34 @@ def registrar_perfil(dual=None):
         # Hold exported D-Bus objects for the daemon lifetime.
         registrar_perfil.dual_profile = register(barramento, gerente, dual, ARQ_HOST, log)
     threading.Thread(target=GLib.MainLoop().run, daemon=True).start()
-    log("perfil HID registrado no BlueZ")
+    log("HID profile registered with BlueZ")
 
 
 def preparar_intr(s):
-    # Buffer de envio mínimo e sem bloqueio: com o buffer padrão (centenas de pacotes), um link
-    # Bluetooth lento acumulava segundos de movimentos velhos do mouse que saíam atrasados.
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1)  # o kernel arredonda para o mínimo
+    # Use a minimal nonblocking send buffer: with the default buffer (hundreds of packets), a slow
+    # Bluetooth link accumulated seconds of stale mouse movements that arrived late.
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1)  # the kernel rounds up to its minimum
     s.setblocking(False)
 
 
 def socket_l2cap():
     s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
-    # BT_SECURITY = MEDIUM: só aceita o Mac pareado, com link criptografado
+    # BT_SECURITY = MEDIUM: accept only the paired Mac over an encrypted link
     s.setsockopt(274, 4, struct.pack("BB", 2, 0))
     return s
 
 
-# ------------------------------------------------- controle do link (HCI)
+# ------------------------------------------------- link control (HCI)
 class LinkHCI:
     """Socket HCI cru: observa as trocas de modo do link (ativo/sniff) e liga/desliga o sniff."""
     HCIGETCONNINFO = 0x800448D5
     MODO_MUDOU = 0x14
-    POLITICA_SEM_SNIFF = 0x0001   # só role switch
+    POLITICA_SEM_SNIFF = 0x0001   # role switch only
     POLITICA_PADRAO = 0x0005      # role switch + sniff
 
     @staticmethod
     def achar_adaptador():
-        """Índice do primeiro hciN (o adaptador pode reaparecer como hci1 após reset do kernel)."""
+        """Index of the first hciN (the adapter may reappear as hci1 after a kernel reset)."""
         import glob, re
         idx = sorted(int(m.group(1)) for c in glob.glob("/sys/class/bluetooth/hci*")
                      if (m := re.fullmatch(r".*/hci(\d+)", c)))
@@ -219,13 +219,13 @@ class LinkHCI:
             dev = self.achar_adaptador()
         self.sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI)
         self.sock.bind((dev,))
-        # filtro: só pacotes de evento (tipo 4), só o evento "Mode Change" (0x14)
+        # Filter: event packets only (type 4), and only the "Mode Change" event (0x14)
         filtro = struct.pack("<IIIH2x", 1 << 4, 1 << self.MODO_MUDOU, 0, 0)
         self.sock.setsockopt(0, 2, filtro)  # SOL_HCI, HCI_FILTER
 
     def handle(self, endereco):
         bd = bytes(int(x, 16) for x in reversed(endereco.split(":")))
-        buf = bytearray(bd + b"\x01" + bytes(1 + 16))  # ACL_LINK; conn_info começa no offset 8
+        buf = bytearray(bd + b"\x01" + bytes(1 + 16))  # ACL_LINK; conn_info starts at offset 8
         try:
             fcntl.ioctl(self.sock.fileno(), self.HCIGETCONNINFO, buf)
         except OSError:
@@ -244,18 +244,18 @@ class LinkHCI:
         self.comando(0x000D, struct.pack("<HH", h, politica))  # Write_Link_Policy_Settings
         if desligar:
             self.comando(0x0004, struct.pack("<H", h))         # Exit_Sniff_Mode
-        log(f"link {h:#x}: sniff {'proibido' if desligar else 'liberado'}")
+        log(f"link {h:#x}: sniff {'disabled' if desligar else 'enabled'}")
 
     def ler(self):
         dados = self.sock.recv(64)
         if len(dados) >= 9 and dados[0] == 4 and dados[1] == self.MODO_MUDOU:
             status, h, modo, intervalo = struct.unpack_from("<BHBH", dados, 3)
-            nome = {0: "ativo", 1: "hold", 2: "sniff"}.get(modo, str(modo))
-            log(f"link {h:#x}: modo {nome}" + (f", intervalo {intervalo * 0.625:.1f} ms" if modo else "")
+            nome = {0: "active", 1: "hold", 2: "sniff"}.get(modo, str(modo))
+            log(f"link {h:#x}: mode {nome}" + (f", intervalo {intervalo * 0.625:.1f} ms" if modo else "")
                 + (f" (status {status:#x})" if status else ""))
 
 
-# ------------------------------------------------------------------ o serviço
+# ------------------------------------------------------------------ service
 class KVM:
     def __init__(self, dual=None):
         self.dual = dual
@@ -272,11 +272,11 @@ class KVM:
         self.esperando_soltar = False
         self.ctrl = self.intr = None
         self.dx = self.dy = self.roda = self.rodah = 0
-        self.roda_hr = self.rodah_hr = 0  # roda em 1/120 de clique (alta resolução)
+        self.roda_hr = self.rodah_hr = 0  # wheel in 1/120-click units (high resolution)
         self.botoes = 0
         self.mouse_pendente = False
         self.ultimo_mouse = 0.0
-        self.fila = collections.deque()  # teclas/botões que não couberam no buffer: nunca descartados
+        self.fila = collections.deque()  # keys/buttons that did not fit in the buffer: never discarded
         self.ouvir_ctrl = self._ouvir(PSM_CTRL)
         self.ouvir_intr = self._ouvir(PSM_INTR)
         self.hci = LinkHCI()
@@ -287,7 +287,7 @@ class KVM:
                     self.host = source.read().strip() or None
             except OSError:
                 pass
-        self.envios = self.cheios = 0  # estatística do mouse, vai para o log
+        self.envios = self.cheios = 0  # mouse statistics, written to the log
         self.ultima_estatistica = 0.0
 
     @staticmethod
@@ -334,16 +334,16 @@ class KVM:
     def remover(self, fd):
         d = self.dispositivos.pop(fd, None)
         if d:
-            log(f"dispositivo removido: {d.path}")
+            log(f"device removed: {d.path}")
             try:
                 d.close()
             except OSError:
                 pass
             self.pressionadas = set()
             if self.dual and self.ativo:
-                self.desativar("Dispositivo removido — entrada no PC")
+                self.desativar("Input device removed — input returned to the PC")
 
-    # ---- conexão Bluetooth
+    # ---- Bluetooth connection
     @property
     def conectado(self):
         return self.ctrl is not None and self.intr is not None
@@ -357,15 +357,15 @@ class KVM:
                     pass
         self.ctrl = self.intr = None
         self.fila.clear()
-        log(f"desconectado: {motivo}")
+        log(f"disconnected: {motivo}")
         if self.ativo and (not self.dual or self.dual_mode != "AGENT"):
-            self.desativar("Mac desconectou — teclado e mouse de volta no PC")
+            self.desativar("Mac disconnected — keyboard and mouse returned to the PC")
 
     def conectar(self):
         try:
             host = open(ARQ_HOST).read().strip()
         except OSError:
-            avisar("Mac ainda não pareado — rode: btkvm-parear")
+            avisar("Mac is not paired yet — run: btkvm-parear")
             return False
         try:
             c = socket_l2cap()
@@ -375,14 +375,14 @@ class KVM:
             i.settimeout(6)
             i.connect((host, PSM_INTR))
         except OSError as erro:
-            log(f"falha ao conectar em {host}: {erro}")
-            avisar("Não consegui conectar ao Mac (Bluetooth do Mac ligado?)")
+            log(f"failed to connect to {host}: {erro}")
+            avisar("Could not connect to the Mac (is Bluetooth enabled on the Mac?)")
             return False
         c.settimeout(None)
         preparar_intr(i)
         self.ctrl, self.intr = c, i
         self.host = host
-        log(f"conectado a {host}")
+        log(f"connected to {host}")
         return True
 
     def aceitar(self, ouvinte):
@@ -392,11 +392,11 @@ class KVM:
             registrado = open(ARQ_HOST).read().strip()
         except OSError:
             registrado = ""
-        # Só o host registrado vale: um celular ou outro dispositivo pareado também abre as
-        # portas HID e, antes, acabava sobrescrevendo o endereço do Mac.
+        # Accept only the registered host: phones and other paired devices can also open the
+        # HID ports and previously overwrote the Mac address.
         if registrado and endereco.upper() != registrado.upper():
-            log(f"recusado {endereco}: o teclado/mouse é do host {registrado} "
-                f"(para trocar de host, apague {ARQ_HOST} e pareie de novo)")
+            log(f"rejected {endereco}: keyboard/mouse belongs to host {registrado} "
+                f"(to change hosts, remove {ARQ_HOST} and pair again)")
             s.close()
             return
         if ouvinte is self.ouvir_ctrl:
@@ -412,7 +412,7 @@ class KVM:
         os.makedirs(os.path.dirname(ARQ_HOST), exist_ok=True)
         with open(ARQ_HOST, "w") as f:
             f.write(endereco + "\n")
-        log(f"Mac {endereco} conectou ({'ctrl' if ouvinte is self.ouvir_ctrl else 'intr'})")
+        log(f"Mac {endereco} connected ({'ctrl' if ouvinte is self.ouvir_ctrl else 'intr'})")
 
     def controle(self):
         try:
@@ -445,10 +445,10 @@ class KVM:
         except OSError:
             dados = b""
         if not dados:
-            self.desconectar("canal de interrupção fechado")
+            self.desconectar("interrupt channel closed")
 
     def _mandar(self, relatorio):
-        """True se saiu (ou não há para onde mandar); False se o buffer está cheio."""
+        """True if sent (or if there is nowhere to send); False if the buffer is full."""
         if not self.intr:
             return True
         try:
@@ -468,8 +468,8 @@ class KVM:
                 self.fila.popleft()
 
     def enviar(self, relatorio, importante=True):
-        """Relatórios importantes (teclas, botões) entram na fila e saem em ordem.
-        Movimento do mouse não é importante: se não couber, volta False e é somado ao próximo."""
+        """Important reports (keys, buttons) are queued and sent in order.
+        Mouse movement is nonessential: if it does not fit, return False and add it to the next report."""
         if importante:
             self.fila.append(relatorio)
             self.esvaziar_fila()
@@ -477,7 +477,7 @@ class KVM:
         self.esvaziar_fila()
         return not self.fila and self._mandar(relatorio)
 
-    # ---- relatórios
+    # ---- reports
     def enviar_teclado(self):
         mods = 0
         teclas = []
@@ -523,7 +523,7 @@ class KVM:
             return
         if not self.conectado and not self.conectar():
             return
-        # só agarra depois que Super e K forem soltos, senão o GNOME fica com o Super "preso"
+        # grab only after Super and K are released, otherwise GNOME may keep Super "stuck"
         self.esperando_soltar = True
 
     def _agarrar_tudo(self):
@@ -541,10 +541,10 @@ class KVM:
             self.dual.activate()
         if self.host:
             self.hci.sem_sniff(self.host, True)
-        avisar("Teclado e mouse no Mac")
-        log("ativo: entrada indo para o Mac")
+        avisar("Keyboard and mouse are on the Mac")
+        log("active: input is routed to the Mac")
 
-    def desativar(self, msg="Teclado e mouse de volta no PC"):
+    def desativar(self, msg="Keyboard and mouse returned to the PC"):
         if self.dual:
             self.dual.deactivate()
             self.dual_mode = "INACTIVE"
@@ -558,9 +558,9 @@ class KVM:
         if self.host and (self.conectado or self.dual):
             self.hci.sem_sniff(self.host, False)
         avisar(msg)
-        log("inativo: entrada no PC")
+        log("inactive: input is routed to the PC")
 
-    # ---- modo dual (opt-in): o caminho HID acima continua sendo o padrão
+    # ---- dual mode (opt-in): the HID path above remains the default
     def _dual_usage(self, codigo):
         if codigo in MODIFICADORES:
             return 0x0700 | (0xE0 + MODIFICADORES[codigo].bit_length() - 1)
@@ -579,11 +579,11 @@ class KVM:
     def _dual_notices(self):
         for notice in self.dual.drain_notices():
             if notice.kind == "fatal":
-                log(f"dual: falha do runtime: {notice.value}")
-                self.desativar("Modo dual falhou — entrada no PC")
+                log(f"dual: runtime failure: {notice.value}")
+                self.desativar("Dual mode failed — input returned to the PC")
             elif notice.kind == "mode":
                 change = notice.value
-                log(f"dual: {change.old.name} → {change.new.name}, época {change.epoch}: {change.reason}")
+                log(f"dual: {change.old.name} → {change.new.name}, epoch {change.epoch}: {change.reason}")
                 if not self.ativo:
                     continue
                 self.dual_epoch = change.epoch
@@ -597,9 +597,9 @@ class KVM:
                 elif change.new.name == "HID":
                     if not self.conectado:
                         # Restore PC input before a potentially slow HID connect.
-                        self.desativar("Agente indisponível — conectando o HID")
+                        self.desativar("Agent unavailable — connecting HID")
                         if self.conectar():
-                            avisar("HID conectado — pressione Super+K para tentar novamente")
+                            avisar("HID connected — press Super+K to try again")
                         continue
                     self.zerar_mac()
                     self.botoes = sum(BOTOES[c] for c in self.pressionadas if c in BOTOES)
@@ -607,7 +607,7 @@ class KVM:
                     self.enviar_mouse(importante=True)
                     media = next((MIDIA[c] for c in self.pressionadas if c in MIDIA), 0)
                     self.enviar(struct.pack("<BH", 3, media))
-                    avisar("Teclado e mouse no Mac via HID")
+                    avisar("Keyboard and mouse are on the Mac via HID")
             elif notice.kind == "telemetry":
                 log("dual 5s: " + str(notice.value))
             elif notice.kind in ("link_lost", "session_ready"):
@@ -618,7 +618,7 @@ class KVM:
             self.dual.ready(self.dual_epoch, usages, self._dual_mouse())
             self.dual_pending = False
             self.dual_ready = True
-            avisar("Teclado e mouse no Mac via LAN + Bluetooth")
+            avisar("Keyboard and mouse are on the Mac via LAN + Bluetooth")
 
     def _dual_relative(self, ev, disp):
         index = {e.REL_X: 0, e.REL_Y: 1, e.REL_WHEEL_HI_RES: 2,
@@ -639,7 +639,7 @@ class KVM:
     def evento(self, ev, disp=None):
         if ev.type == e.EV_KEY:
             codigo, valor = ev.code, ev.value
-            if valor == 2:  # repetição: o Mac faz a sua própria
+            if valor == 2:  # repeat: the Mac handles its own
                 return
             if valor:
                 self.pressionadas.add(codigo)
@@ -683,7 +683,7 @@ class KVM:
             elif ev.code == e.REL_Y:
                 self.dy += ev.value
             elif ev.code in (e.REL_WHEEL_HI_RES, e.REL_HWHEEL_HI_RES):
-                # camadas como o OpenLogi só emitem HI_RES (120 = 1 clique)
+                # layers such as OpenLogi emit only HI_RES (120 = 1 click)
                 if ev.code == e.REL_WHEEL_HI_RES:
                     self.roda_hr += ev.value
                     n = int(self.roda_hr / 120)
@@ -697,7 +697,7 @@ class KVM:
                 if not n:
                     return
             elif ev.code in (e.REL_WHEEL, e.REL_HWHEEL):
-                # só vale em dispositivo sem HI_RES, senão contaria em dobro
+                # use only on devices without HI_RES to avoid double counting
                 if disp is not None and e.REL_WHEEL_HI_RES in disp.capabilities().get(e.EV_REL, []):
                     return
                 if ev.code == e.REL_WHEEL:

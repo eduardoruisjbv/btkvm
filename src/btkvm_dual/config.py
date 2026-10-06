@@ -13,7 +13,7 @@ def load(path="/etc/btkvm.conf"):
             key, separator, value = line.partition("=")
             key, value = key.strip(), value.strip()
             if not separator or key not in values:
-                raise ValueError(f"{path}:{number}: configuração inválida")
+                raise ValueError(f"{path}:{number}: invalid configuration")
             values[key] = value
     if values["modo"] not in ("hid", "dual"):
         raise ValueError("modo deve ser hid ou dual")

@@ -1,259 +1,223 @@
-# btkvm dual — especificação do protocolo (implementação local v0.1)
+# btkvm dual — protocol specification (local implementation v0.1)
 
-Status: **implementação local em revisão**. Fontes do PC e do agente Swift existem;
-o agente ainda precisa ser compilado no macOS e os links/trocas de modo validados
-em um Mac real. Não foram executados testes funcionais ou simuladores nesta etapa.
-Resultado de uma entrevista de requisitos em 2026-10-05.
-O modo atual (HID puro) **não muda** e continua sendo o padrão.
+Status: **local implementation under review**. PC and Swift agent sources exist; the agent still needs to be compiled on macOS, and the links and mode switches need validation on a real Mac. No functional tests or simulators were run at this stage. Based on a requirements interview on 2026-10-05. The current pure HID mode **does not change** and remains the default.
 
-## 1. Objetivo e princípios
+## 1. Goal and principles
 
-Dividir a carga entre dois links (LAN/Wi-Fi e Bluetooth) entre o PC e o Mac, sem que um sobrecarregue o outro, e sem perder o funcionamento "sem software no Mac" como rede de segurança.
+Split the load across two links (LAN/Wi-Fi and Bluetooth) between the PC and Mac so neither link is overloaded, while keeping the current “no software on the Mac” path as a safety net.
 
-1. **O pior cenário manda.** Projetar para o Mac em Wi-Fi 2,4 GHz (rádio e espectro compartilhados com o Bluetooth), sem trocar de banda ou de rede.
-2. **Perder pacote não pode custar precisão.** O estado do mouse viaja como contadores cumulativos; pacotes duplicados ou perdidos não alteram o resultado.
-3. **Um escritor por vez.** A cada instante, exatamente um caminho (agente ou HID) recebe os eventos. A troca é atômica e solta todas as teclas do caminho antigo.
-4. **Evitar falso positivo é mais importante que reagir rápido.** Um teclado parado por alguns segundos incomoda menos que um mouse errático ou em dobro.
-5. **Medir antes de afirmar.** Toda decisão de taxa e de failover é observável na telemetria.
+1. **Design for the worst case.** Assume the Mac is on 2.4 GHz Wi-Fi (radio and spectrum shared with Bluetooth), with no band or network change.
+2. **Packet loss must not cost accuracy.** Mouse state is sent as cumulative counters; duplicated or lost packets do not change the result.
+3. **One writer at a time.** Exactly one path (agent or HID) receives events at any instant. Switching is atomic and releases all keys on the old path.
+4. **Avoid false positives before reacting quickly.** A keyboard paused for a few seconds is less disruptive than an erratic or doubled mouse.
+5. **Measure before making claims.** Every rate and failover decision is observable in telemetry.
 
-## 2. Topologia e camadas
+## 2. Topology and layers
 
 ```
         PC (btkvm, root)                         MacBook
  ┌───────────────────────────┐            ┌─────────────────────────┐
- │ evdev (teclado/mouse)     │            │  btkvm-agent (Swift)    │
- │      │                    │            │   injeta via CGEvent    │
- │  núcleo do protocolo      │            │                         │
- │   ├─ A: UDP/LAN ──────────┼── Wi-Fi ───┼─► canal A               │
- │   ├─ B: RFCOMM ───────────┼── BT ──────┼─► canal B   (dedup)     │
- │   └─ C: HID (atual) ──────┼── BT ──────┼─► macOS direto (reserva)│
+ │ evdev (keyboard/mouse)    │            │  btkvm-agent (Swift)    │
+ │      │                    │            │   injects via CGEvent   │
+ │  protocol core            │            │                         │
+ │   ├─ A: UDP/LAN ──────────┼── Wi-Fi ───┼─► channel A             │
+ │   ├─ B: RFCOMM ───────────┼── BT ──────┼─► channel B (dedup)     │
+ │   └─ C: HID (current) ────┼── BT ──────┼─► direct to macOS (backup)│
  └───────────────────────────┘            └─────────────────────────┘
 ```
 
-| Camada | Canal | Papel | Quando recebe eventos |
+| Layer | Channel | Role | When it receives events |
 |---|---|---|---|
-| A | UDP pela LAN, criptografado | primário, baixa latência | modo agente |
-| B | RFCOMM Bluetooth próprio, criptografado | espelho + handshake + presença | modo agente (mesmos eventos de A) |
-| C | HID Bluetooth (o `btkvm` atual) | última camada, sem agente | só no modo HID; **mudo** no modo agente |
+| A | Encrypted UDP over LAN | Primary, low latency | Agent mode |
+| B | Dedicated Bluetooth RFCOMM, encrypted | Mirror + handshake + presence | Agent mode (same events as A) |
+| C | Bluetooth HID (current `btkvm`) | Final fallback, no agent required | HID mode only; **silent** in agent mode |
 
-Os canais A e B carregam **as mesmas mensagens** (mesmo `msg_seq`); o agente aplica cada uma uma única vez. O HID nunca é usado ao mesmo tempo que A/B, senão o macOS aplicaria o movimento em dobro.
+Channels A and B carry **the same messages** (same `msg_seq`); the agent applies each one exactly once. HID must never run at the same time as A/B, or macOS would apply movement twice.
 
-Áudio: **fora deste protocolo.** O A2DP continua no Bluetooth (Mac e iPhone). O iPhone não participa do agente.
+Audio is **outside this protocol**. A2DP remains on Bluetooth (Mac and iPhone). The iPhone does not participate in the agent.
 
-## 3. Estados do PC
+## 3. PC states
 
 ```
-INATIVO ──Super+K──► NEGOCIANDO ──ACCEPT──► AGENTE ──4 s sem HB_ACK──► HID
-   ▲                     │ (timeout 3 s)       │  ▲                      │
-   │                     ▼                     │  └──≥1 s de HB_ACK─────┘
-   └──Super+K──────── (cai para HID)◄──────────┘
+IDLE ──Super+K──► NEGOTIATING ──ACCEPT──► AGENT ──4 s without HB_ACK──► HID
+  ▲                    │ (3 s timeout)       │  ▲                        │
+  │                    ▼                     │  └──≥1 s of HB_ACK───────┘
+  └──Super+K──────── (fall back to HID)◄─────┘
 ```
 
-- **INATIVO**: teclado/mouse no PC. Heartbeats continuam se houver sessão.
-- **NEGOCIANDO**: handshake pelo BT (§5). Se o agente não responder em 3 s, entra direto em **HID** (comportamento de hoje), sem prender o usuário.
-- **AGENTE**: eventos vão por A e B.
-- **HID**: eventos vão só pelo HID. Heartbeats continuam por A e B para detectar a volta do agente.
-- Super+K sempre volta ao PC, de qualquer estado.
+- **IDLE**: keyboard/mouse are on the PC. Heartbeats continue if a session exists.
+- **NEGOTIATING**: handshake over Bluetooth (§5). If the agent does not respond within 3 seconds, switch directly to **HID** (current behavior), without trapping the user.
+- **AGENT**: events travel over A and B.
+- **HID**: events travel over HID only. Heartbeats continue over A and B to detect agent recovery.
+- Super+K always returns input to the PC from any state.
 
-`mode_epoch` (u8) incrementa a cada troca AGENTE↔HID. Todo evento carrega a época; o agente descarta eventos de época antiga.
+`mode_epoch` (u8) increments at each AGENT↔HID transition. Every event carries the epoch; the agent discards events from older epochs.
 
-## 4. Formato dos pacotes
+## 4. Packet format
 
-Little-endian. Todos os canais usam o mesmo envelope; cada canal tem sua própria sequência de nonce.
+Little-endian. All channels use the same envelope; each channel has its own nonce sequence.
 
 ```
  0      1      2      3      4                8                 16        16+N      16+N+16
  ┌──────┬──────┬──────┬──────┬────────────────┬─────────────────┬─────────┬─────────┐
- │magic │ ver  │ tipo │canal │  session_id    │   ctr (u64)     │ payload │   tag   │
+ │magic │ ver  │ type │chan. │  session_id    │   ctr (u64)     │ payload │   tag   │
  └──────┴──────┴──────┴──────┴────────────────┴─────────────────┴─────────┴─────────┘
 ```
 
-- `magic` = `0xB7`, `ver` = 1, `canal` = 0 (LAN) ou 1 (BT).
-- `session_id` (u32): aleatório por sessão; pacote de outra sessão é descartado.
-- `ctr` (u64): contador de nonce **por direção e por canal**. Nonce AEAD = `dir(1) ‖ canal(1) ‖ 0x0000 ‖ ctr(8)` (12 bytes).
-- Cifra: **ChaCha20-Poly1305**; cabeçalho de 16 bytes (magic até `ctr`) como dados associados. Tag de 16 bytes.
-- Replay: janela deslizante de 128 contadores por (direção, canal). Fora da janela ou repetido → descarta.
-- Sobre RFCOMM (fluxo de bytes), cada pacote vai precedido de `len` (u16).
+- `magic` = `0xB7`, `ver` = 1, `channel` = 0 (LAN) or 1 (BT).
+- `session_id` (u32): random per session; packets from another session are discarded.
+- `ctr` (u64): nonce counter **per direction and channel**. AEAD nonce = `dir(1) ‖ channel(1) ‖ 0x0000 ‖ ctr(8)` (12 bytes).
+- Cipher: **ChaCha20-Poly1305**; 16-byte header (`magic` through `ctr`) is associated data. Tag is 16 bytes.
+- Replay protection: sliding window of 128 counters per (direction, channel). Outside the window or repeated → discard.
+- On RFCOMM (byte stream), each packet is prefixed with `len` (u16).
 
-### 4.1 Tipos de mensagem
+### 4.1 Message types
 
-| Tipo | Código | Direção | Conteúdo |
+| Type | Code | Direction | Payload |
 |---|---|---|---|
-| `HELLO` | 0x01 | PC→Mac (BT) | chave efêmera X25519 do PC, nonce, porta UDP do PC |
-| `ACCEPT` | 0x02 | Mac→PC (BT) | chave efêmera X25519 do Mac, nonce, IP(s) e porta UDP do Mac |
-| `MOUSE` | 0x10 | PC→Mac (A e B) | estado cumulativo do ponteiro (§4.2) |
-| `EVENTS` | 0x11 | PC→Mac (A e B) | transições de tecla/botão, confiáveis (§4.3) |
-| `EVENTS_ACK` | 0x12 | Mac→PC (A e B) | maior `ev_seq` aplicado + máscara dos seguintes |
-| `SNAPSHOT` | 0x13 | PC→Mac (A e B) | conjunto completo de teclas/botões pressionados (a cada ~100 ms) |
-| `SNAPSHOT_ACK` | 0x14 | Mac→PC (A e B) | confirma a referência inicial da nova época antes dos eventos |
-| `HB` | 0x20 | PC→Mac (A e B) | `t_pc_us`, `mode_epoch`, taxa BT atual |
-| `HB_ACK` | 0x21 | Mac→PC (A e B) | eco de `t_pc_us`, estatísticas de recepção por canal (§8) |
-| `MODE` | 0x30 | PC→Mac (A e B) | `hid_takeover` ou `agent_resume`, com `mode_epoch` novo |
-| `MODE_ACK` | 0x31 | Mac→PC | confirma a troca |
-| `BYE` | 0x3F | ambos | encerra a sessão |
+| `HELLO` | 0x01 | PC→Mac (BT) | PC X25519 ephemeral key, nonce, PC UDP port |
+| `ACCEPT` | 0x02 | Mac→PC (BT) | Mac X25519 ephemeral key, nonce, UDP address(es) and port |
+| `MOUSE` | 0x10 | PC→Mac (A and B) | Cumulative pointer state (§4.2) |
+| `EVENTS` | 0x11 | PC→Mac (A and B) | Reliable key/button transitions (§4.3) |
+| `EVENTS_ACK` | 0x12 | Mac→PC (A and B) | Highest applied `ev_seq` plus bitmap of following events |
+| `SNAPSHOT` | 0x13 | PC→Mac (A and B) | Complete set of pressed keys/buttons (about every 100 ms) |
+| `SNAPSHOT_ACK` | 0x14 | Mac→PC (A and B) | Confirms the initial reference for the new epoch before events |
+| `HB` | 0x20 | PC→Mac (A and B) | `t_pc_us`, `mode_epoch`, current BT rate |
+| `HB_ACK` | 0x21 | Mac→PC (A and B) | Echoes `t_pc_us`, receive statistics per channel (§8) |
+| `MODE` | 0x30 | PC→Mac (A and B) | `hid_takeover` or `agent_resume`, with new `mode_epoch` |
+| `MODE_ACK` | 0x31 | Mac→PC | Confirms the mode switch |
+| `BYE` | 0x3F | Either direction | Ends the session |
 
-`HELLO` e `ACCEPT` ainda não têm chave de sessão: vão em claro dentro do link BT criptografado do pareamento (§5), com `session_id` = 0.
+`HELLO` and `ACCEPT` do not have a session key yet: they are sent in clear inside the paired, encrypted Bluetooth link (§5), with `session_id` = 0.
 
-### 4.2 `MOUSE` (cumulativo, idempotente)
+### 4.2 `MOUSE` (cumulative, idempotent)
 
 ```
 sample_seq u32 | epoch u8 | x_total i32 | y_total i32 | wheel_total i32 | hwheel_total i32 | t_pc_us u32
 ```
 
-- Os `*_total` são somas desde o início da sessão (aritmética modular de 32 bits).
-- O agente guarda o último total aplicado e aplica **a diferença** (`novo - ultimo`, com wrap). Pacote com `sample_seq` mais antigo que o último aceito é ignorado; repetido não faz nada.
-- O PC envia sempre os **totais mais recentes**; nunca acumula fila de amostras antigas.
-- Roda: o PC converte `REL_WHEEL_HI_RES` (120 = 1 clique) para unidades de 1/120 em `wheel_total`; o agente converte para pixels do `CGEvent`. Isso torna o scroll suave também no modo agente.
+- Each `*_total` is a sum from the beginning of the session (32-bit modular arithmetic).
+- The agent stores the last applied total and applies **the difference** (`new - previous`, with wrap). A `sample_seq` older than the most recently accepted one is ignored; a repeated sample has no effect.
+- The PC always sends the **latest totals**; it never queues old samples.
+- Wheel: the PC converts `REL_WHEEL_HI_RES` (120 = 1 click) to 1/120 units in `wheel_total`; the agent converts them to `CGEvent` pixels. This also provides smooth scrolling in agent mode.
 
-### 4.3 `EVENTS` (confiável, ordenado, deduplicado)
+### 4.3 `EVENTS` (reliable, ordered, deduplicated)
 
 ```
-ev_seq u32 | epoch u8 | n u8 | n × { codigo u16, valor u8 (0/1), x_total i32, y_total i32, sample_seq u32 }
+ev_seq u32 | epoch u8 | n u8 | n × { code u16, value u8 (0/1), x_total i32, y_total i32, sample_seq u32 }
 ```
 
-- Cobre teclas, teclas de mídia e botões do mouse. Cada evento leva a posição acumulada no momento, para o agente mover o ponteiro até lá **antes** de clicar.
-- O PC reenvia por A e B a cada 20 ms até receber `EVENTS_ACK` cobrindo o `ev_seq`; o agente aplica em ordem de `ev_seq` e descarta duplicados.
-- `SNAPSHOT` (a cada ~100 ms e a cada troca de modo) reenvia o conjunto completo de pressionadas. Se o agente achar que uma tecla está presa e o snapshot diz que não, solta; se o snapshot diz que está pressionada e o agente perdeu o evento, aplica.
+- Covers keys, media keys, and mouse buttons. Each event carries the cumulative position at that moment so the agent can move the pointer there **before** clicking.
+- The PC retransmits over A and B every 20 ms until an `EVENTS_ACK` covers `ev_seq`; the agent applies events in `ev_seq` order and drops duplicates.
+- `SNAPSHOT` (about every 100 ms and on every mode switch) resends the complete set of pressed inputs. If the agent thinks a key is stuck but the snapshot says it is released, it releases it; if the snapshot says it is pressed and the agent missed the event, it applies the press.
 
-Na implementação, `codigo` é `(HID usage page << 8) | usage`: página 7 para
-teclado, 9 para botões e 12 para mídia. O `sample_seq` de cada transição permite
-posicionar um clique antes de restaurar uma amostra de mouse que tenha chegado
-adiantada. Movimento antigo não faz o ponteiro voltar após um evento mais recente.
+In the implementation, `code` is `(HID usage page << 8) | usage`: page 7 for keyboard, 9 for buttons, and 12 for media. Each transition's `sample_seq` lets a click be placed before restoring an earlier mouse sample that arrived out of order. Old movement never moves the pointer back after a newer event.
 
-`EVENTS_ACK` = `base u32 | bitmap u64 | epoch u8`. O bitmap confirma os pacotes
-seguintes já retidos na janela; a aplicação continua ordenada pelo `base`.
-ACKs de outra época não removem eventos da fila atual. A fila tem 64 transições;
-se esgotar, o PC entra em HID e sincroniza o conjunto físico pressionado.
+`EVENTS_ACK` = `base u32 | bitmap u64 | epoch u8`. The bitmap acknowledges later packets already held in the window; application remains ordered by `base`. ACKs from another epoch do not remove events from the current queue. The queue holds 64 transitions; if it fills, the PC switches to HID and synchronizes the physical pressed state.
 
-`SNAPSHOT` = `epoch u8 | n u8 | bootstrap u8 | next_ev_seq u32 | MOUSE(25 B) |
-n × codigo u16`. O snapshot periódico só reconcilia o estado depois das
-transições anteriores a `next_ev_seq`; snapshots antigos são ignorados. O
-snapshot inicial (`bootstrap=1`) define os totais cumulativos sem mover o
-ponteiro, evitando reaplicar o movimento que já foi feito pelo HID.
-`SNAPSHOT_ACK` tem um único byte (`epoch`). O PC repete a referência inicial
-até esse ACK antes de liberar `MOUSE`/`EVENTS`.
-Sem essa confirmação por 3 segundos, a ativação volta ao HID mesmo que os
-heartbeats estejam respondendo.
+`SNAPSHOT` = `epoch u8 | n u8 | bootstrap u8 | next_ev_seq u32 | MOUSE(25 B) | n × code u16`. A periodic snapshot reconciles state only after transitions before `next_ev_seq`; older snapshots are ignored. The initial snapshot (`bootstrap=1`) establishes cumulative totals without moving the pointer, preventing movement already performed by HID from being applied again. `SNAPSHOT_ACK` contains one byte (`epoch`). The PC repeats the initial reference until this ACK arrives before enabling `MOUSE`/`EVENTS`. If it is not confirmed within 3 seconds, activation returns to HID even if heartbeats are responding.
 
-## 5. Handshake e chaves (Bluetooth como autenticação invisível)
+## 5. Handshake and keys (Bluetooth as invisible authentication)
 
-Acontece sozinho a cada ativação (Super+K de entrada), sem digitar nada:
+Runs automatically on each activation (Super+K to enter), with no manual input:
 
-1. O PC envia `HELLO` pelo canal B (RFCOMM, só aceito sobre **link criptografado do pareamento BT**; conexão sem criptografia é recusada).
-2. O Mac responde `ACCEPT` com sua chave efêmera e o **endereço IP e a porta UDP** onde o agente escuta. Isso elimina configuração de IP e descoberta por mDNS.
-3. Ambos calculam `segredo = X25519(efêmera_própria, efêmera_remota)` e derivam duas chaves de tráfego (uma por direção) com `HKDF-SHA256(segredo, salt = nonce_pc ‖ nonce_mac, info = "btkvm/1")`.
-4. A LAN passa a ser aceita **somente** com pacotes que decifram com essa chave. Pacotes de intrusos na rede Wi-Fi são descartados na primeira checagem de tag.
-5. Nova sessão a cada ativação; rechaveamento também após 2³² pacotes ou 1 hora.
+1. The PC sends `HELLO` over channel B (RFCOMM, accepted only over the **encrypted paired Bluetooth link**; unencrypted connections are rejected).
+2. The Mac responds with `ACCEPT`, its ephemeral key, and the **IP address and UDP port** where the agent listens. No IP configuration or mDNS discovery is needed.
+3. Both sides calculate `secret = X25519(own_ephemeral, remote_ephemeral)` and derive two traffic keys (one per direction) with `HKDF-SHA256(secret, salt = nonce_pc ‖ nonce_mac, info = "btkvm/1")`.
+4. LAN traffic is accepted **only** when it decrypts with this key. Packets from intruders on the Wi-Fi network are discarded at the first tag check.
+5. A new session starts with each activation; keys are also rotated after 2³² packets or 1 hour.
 
-Campos implementados em `HELLO`: `public_key[32] | nonce_pc[16] | udp_port u16 |
-new_session_id u32`. O cabeçalho do handshake continua com `session_id=0`.
-`ACCEPT`: `public_key[32] | nonce_mac[16] | count u8 | udp_port u16 |
-count × IPv4[4]`. Até oito endereços; zero permite usar apenas RFCOMM.
-O PC tenta os endereços anunciados e fixa o primeiro que devolver ACK com AEAD
-válido. IPv6 não está implementado nesta versão.
+Implemented `HELLO` fields: `public_key[32] | nonce_pc[16] | udp_port u16 | new_session_id u32`. The handshake header still uses `session_id=0`. `ACCEPT`: `public_key[32] | nonce_mac[16] | count u8 | udp_port u16 | count × IPv4[4]`. Up to eight addresses; zero addresses means RFCOMM only. The PC tries advertised addresses and selects the first to return an ACK with a valid AEAD. IPv6 is not implemented in this version.
 
-O serviço RFCOMM usa UUID `8ea6e923-cc7d-4b58-93c5-72eb7376b8f1` e canal 22.
-BlueZ exige autenticação; `NewConnection` também verifica `Paired`, endereço do
-host HID registrado e `BT_SECURITY >= MEDIUM`. O Mac verifica o pareamento e o
-modo de criptografia antes de aceitar um `HELLO`.
+The RFCOMM service uses UUID `8ea6e923-cc7d-4b58-93c5-72eb7376b8f1` and channel 22. BlueZ requires authentication; `NewConnection` also checks `Paired`, the registered HID host address, and `BT_SECURITY >= MEDIUM`. The Mac checks pairing and encryption mode before accepting a `HELLO`.
 
-Autenticidade: o canal BT já está autenticado e criptografado pelo pareamento Bluetooth, e as chaves efêmeras viajam dentro dele. Nada de longo prazo é guardado em disco nesta versão.
+Authenticity: the Bluetooth channel is already authenticated and encrypted by pairing, and ephemeral keys travel inside it. No long-term key is stored on disk in this version.
 
-> Limite conhecido: um atacante que consiga se passar pelo Mac no próprio Bluetooth (quebrando o pareamento) obteria a sessão. A fixação de uma identidade de longo prazo (Ed25519) fica como evolução (§12).
+> Known limitation: an attacker who can impersonate the Mac over Bluetooth (by breaking pairing) can obtain the session. Pinning a long-term identity (Ed25519) is a future improvement (§12).
 
-## 6. Taxas e adaptação
+## 6. Rates and adaptation
 
-| Canal | Taxa de `MOUSE` | Observação |
+| Channel | `MOUSE` rate | Notes |
 |---|---|---|
-| A (LAN) | até ~250 Hz | UDP, sem fila |
-| B (BT), normal | ~20–30 Hz (piso) | leve; convive com o A2DP |
-| B (BT), degradado | ~125 Hz | só enquanto a LAN estiver ruim |
+| A (LAN) | Up to ~250 Hz | UDP, no queue |
+| B (BT), normal | ~20–30 Hz (floor) | Light traffic; coexists with A2DP |
+| B (BT), degraded | ~125 Hz | Only while LAN is unhealthy |
 
-- **Estimativa de saúde da LAN** (janela de 1 s, a partir do `HB`/`HB_ACK` e das estatísticas de recepção que o Mac devolve): LAN é **degradada** se `perda > 5 %`, ou `RTT p95 > 40 ms`, ou houver intervalo sem resposta `> 100 ms`.
-- **Histerese:** entra em degradado imediatamente; volta ao normal após 3 s contínuos de LAN saudável.
-- **Sem fila no BT:** se o buffer de saída do RFCOMM estiver acima do limite (`TIOCOUTQ`), a amostra `MOUSE` é **descartada** (os totais do próximo pacote cobrem). `EVENTS` nunca é descartado (fila pequena e limitada, ~64).
-- Tamanho: `MOUSE` = 25 B de payload + 16 B de cabeçalho + 16 B de tag = 57 B. A 250 Hz na LAN ≈ 14 KB/s; a 25 Hz no BT ≈ 1,4 KB/s; a 125 Hz no BT ≈ 7 KB/s (o A2DP SBC usa ~40 KB/s).
+- **LAN health estimate** (1-second window, based on `HB`/`HB_ACK` and returned receive statistics): LAN is **degraded** if `loss > 5%`, or `RTT p95 > 40 ms`, or a response gap is `> 100 ms`.
+- **Hysteresis:** enter degraded mode immediately; return to normal after 3 seconds of continuously healthy LAN.
+- **No BT queue:** if the RFCOMM output buffer exceeds the limit (`TIOCOUTQ`), discard the `MOUSE` sample (the next packet's totals cover it). Never discard `EVENTS` (small, bounded queue of about 64).
+- Size: `MOUSE` = 25 B payload + 16 B header + 16 B tag = 57 B. At 250 Hz on LAN ≈ 14 KB/s; at 25 Hz on BT ≈ 1.4 KB/s; at 125 Hz on BT ≈ 7 KB/s (A2DP SBC uses about 40 KB/s).
 
-## 7. Queda para o HID (3ª camada)
+## 7. HID fallback (third layer)
 
-- **Gatilho:** nenhum `HB_ACK` autenticado válido, em **nenhum** dos dois canais, por **4 s**. Silêncio é falta de resposta do agente (heartbeat ~10 Hz por canal), não ociosidade do usuário.
-- Ao disparar: o PC incrementa `mode_epoch`, envia `MODE{hid_takeover}` (melhor esforço), solta todas as teclas do caminho do agente e liga o HID.
-- **Retorno:** ao receber `HB_ACK` válidos por ≥ 1 s contínuo, o PC envia `MODE{agent_resume}`, espera `MODE_ACK`, desliga o HID (todas as teclas soltas) e volta ao modo agente.
-- `agent_resume` prepara o agente, mas ainda não injeta. Após `MODE_ACK`, o PC
-  esvazia os relatórios de soltura do HID e entrega o snapshot inicial; somente
-  então o agente permite a injeção. A negociação inicial usa a mesma confirmação.
-- `MODE` é repetido a cada 100 ms até `MODE_ACK`; heartbeats com época mais nova
-  também fazem o agente soltar a época anterior. Entrada enfileirada de outra
-  época não é enviada. A ausência de conexão HID devolve a entrada ao PC antes
-  de iniciar uma tentativa de reconexão, que pode bloquear no Bluetooth.
-- **Regra do escritor único:** no modo HID o PC **para** de enviar `MOUSE`/`EVENTS` ao agente (só `HB`/`MODE`), então mesmo que o agente esteja vivo e só os ACKs tenham se perdido, não há movimento em dobro.
-- **Vigia no agente:** se o agente ficar > 2 s sem pacote autenticado do PC, solta todas as teclas e botões que ele mesmo pressionou.
-- Quando o macOS está na tela de login/bloqueio, o agente de usuário não injeta; o HID cobre esse caso.
+- **Trigger:** no valid authenticated `HB_ACK` on **either** channel for **4 seconds**. Silence means no agent response (heartbeat about 10 Hz per channel), not that the user is idle.
+- On trigger, the PC increments `mode_epoch`, sends `MODE{hid_takeover}` (best effort), releases all keys on the agent path, and enables HID.
+- **Return:** after receiving valid `HB_ACK`s continuously for at least 1 second, the PC sends `MODE{agent_resume}`, waits for `MODE_ACK`, disables HID (all keys released), and returns to agent mode.
+- `agent_resume` prepares the agent but does not inject events yet. After `MODE_ACK`, the PC drains HID release reports and sends the initial snapshot; only then does the agent enable injection. Initial negotiation uses the same confirmation.
+- `MODE` is repeated every 100 ms until `MODE_ACK`; heartbeats with a newer epoch also make the agent release the previous epoch. Queued input from another epoch is not sent. Without a HID connection, input is returned to the PC before a reconnection attempt, which may block on Bluetooth.
+- **Single-writer rule:** in HID mode, the PC **stops** sending `MOUSE`/`EVENTS` to the agent (only `HB`/`MODE` continue), so even if the agent is alive and only ACKs were lost, movement is never doubled.
+- **Agent watchdog:** if the agent receives no authenticated PC packet for more than 2 seconds, it releases all keys and buttons it pressed.
+- On the macOS login/lock screen, the user agent cannot inject events; HID covers this case.
 
-## 8. Telemetria
+## 8. Telemetry
 
-Medida nos dois lados e devolvida no `HB_ACK`:
+Measured on both sides and returned in `HB_ACK`:
 
-| Métrica | Onde |
+| Metric | Side |
 |---|---|
-| RTT por canal (p50/p95/p99) | PC |
-| perda recebida por canal, duplicados, fora de ordem | Mac, devolvido ao PC |
-| `MOUSE` descartados por buffer cheio (BT) | PC |
-| tempo em degradado, trocas de modo, quedas para HID | PC |
-| `EVENTS` reenviados | PC |
-| banda e RSSI do Wi-Fi, estado do Bluetooth | Mac (informativo) |
+| RTT per channel (p50/p95/p99) | PC |
+| Received loss per channel, duplicates, out-of-order packets | Mac, returned to PC |
+| `MOUSE` samples discarded due to a full buffer (BT) | PC |
+| Time in degraded mode, mode switches, HID fallbacks | PC |
+| Retransmitted `EVENTS` | PC |
+| Wi-Fi band/RSSI, Bluetooth state | Mac (informational) |
 
-- Resumo a cada 5 s no `journalctl -u btkvm` e comando `btkvm-stats`.
-- `HB_ACK` = `t_pc_us u32 | epoch u8 | received u32 | lost u32 | duplicates u32 |
-  out_of_order u32`, reportando o canal em que chegou o HB. Contadores cumulativos
-  são comparados em uma janela de 1 segundo para a adaptação. RSSI/banda do Wi-Fi
-  são informativos no log do Mac quando o sistema permite consultá-los.
-- `/run/btkvm-dual.json` recebe o último resumo; `btkvm-stats` marca relatórios
-  com mais de 15 segundos como antigos. Taxas nominais não são latência medida.
-- **Linha de base do HID atual:** o agente tem um modo `--observe` (somente escuta, sem injetar, com permissão de Monitoramento de Entrada) que registra o intervalo entre eventos chegando pelo HID. Mostra jitter e engasgos do modo atual para comparar com o dual. Ressalva: o HID não tem RTT; a comparação é por regularidade de chegada e pela contagem "adiados por buffer cheio" que o `btkvm` já registra.
+- Summary every 5 seconds in `journalctl -u btkvm` and the `btkvm-stats` command.
+- `HB_ACK` = `t_pc_us u32 | epoch u8 | received u32 | lost u32 | duplicates u32 | out_of_order u32`, reporting the channel where the HB arrived. Cumulative counters are compared over a 1-second window for adaptation. Wi-Fi RSSI/band are logged on the Mac when the system allows them to be queried.
+- `/run/btkvm-dual.json` receives the latest summary; `btkvm-stats` marks reports older than 15 seconds as stale. Nominal rates are not measured latency.
+- **Current HID baseline:** the agent has an observe-only `--observe` mode (no injection; requires Input Monitoring permission) that records the interval between events received over HID. This shows jitter and stutter in the current mode for comparison with dual mode. Limitation: HID has no RTT; compare arrival regularity and `deferred due to full buffer` counts already logged by `btkvm`.
 
-## 9. Agente do Mac (`btkvm-agent`, Swift, binário único)
+## 9. Mac agent (`btkvm-agent`, Swift, single binary)
 
-- Compilado com `swiftc` (Command Line Tools); iniciado no login por um LaunchAgent (`~/Library/LaunchAgents/`).
-- Permissões do macOS: **Acessibilidade** (injetar eventos), **Bluetooth** (RFCOMM), **Rede local** (UDP) e, só para `--observe`, **Monitoramento de Entrada**.
-- Injeção: ponteiro com `CGEvent` (posição = atual + diferença, limitada à tela), roda com `CGEventCreateScrollWheelEvent2`, teclas com `CGEventCreateKeyboardEvent` (tabela HID usage → keycode do macOS) e teclas de mídia por eventos de sistema.
-- Canal B: cliente RFCOMM (`IOBluetooth`) para um UUID de serviço próprio publicado pelo PC; reconecta sozinho.
-- Canal A: soquete UDP (`Network.framework`) na porta anunciada no `ACCEPT`.
-- Log em `~/Library/Logs/btkvm-agent.log`.
-- Assinatura: assinar com identidade estável (mesmo bundle id) para o macOS não revogar as permissões a cada recompilação.
+- Compiled with `swiftc` (Command Line Tools); started at login through a LaunchAgent (`~/Library/LaunchAgents/`).
+- macOS permissions: **Accessibility** (inject events), **Bluetooth** (RFCOMM), **Local Network** (UDP), and **Input Monitoring** only for `--observe`.
+- Injection: pointer with `CGEvent` (position = current + delta, clamped to the display), wheel with `CGEventCreateScrollWheelEvent2`, keys with `CGEventCreateKeyboardEvent` (HID usage → macOS keycode table), and media keys through system events.
+- Channel B: RFCOMM client (`IOBluetooth`) for the PC's dedicated service UUID; reconnects automatically.
+- Channel A: UDP socket (`Network.framework`) on the port advertised in `ACCEPT`.
+- Log: `~/Library/Logs/btkvm-agent.log`.
+- Signing: use a stable signing identity (same bundle ID) so macOS does not revoke permissions on every rebuild.
 
-## 10. Organização do código
+## 10. Code organization
 
-- `src/btkvm`: integração opcional, preservando o caminho HID padrão. Novo modo selecionado em `/etc/btkvm.conf` (`modo = hid` padrão, `dual`).
-- Núcleo do protocolo como módulo puro e testável (sem I/O): serialização, AEAD, dedup, contadores, máquina de estados, adaptação de taxa.
-- Transportes separados: LAN (UDP) e BT (RFCOMM via `ProfileManager1` do BlueZ, que o `btkvm` já usa).
-- `mac-agent/`: pacote Swift com o agente.
-- Instalador: opção `--dual`; sem ela nada muda.
+- `src/btkvm`: optional integration preserving the default HID path. Select the new mode in `/etc/btkvm.conf` (`mode = hid` by default, or `dual`).
+- Protocol core as a pure, testable module (no I/O): serialization, AEAD, deduplication, counters, state machine, and rate adaptation.
+- Separate transports: LAN (UDP) and BT (RFCOMM via BlueZ `ProfileManager1`, already used by `btkvm`).
+- `mac-agent/`: Swift agent package.
+- Installer: `--dual` option; without it, existing behavior remains unchanged.
 
-## 11. Testes
+## 11. Tests
 
-Plano de validação futuro. Esta etapa apenas conferiu sintaxe Python/Bash;
-as propriedades abaixo ainda não foram demonstradas em simulador ou hardware.
+Future validation plan. This stage checked only Python/Bash syntax; the properties below have not yet been demonstrated in a simulator or on hardware.
 
-1. **Núcleo, no PC, com simulador de rede** (perda, duplicação, reordenação, atraso, rajada, em cada canal, com semente fixa): propriedades que sempre devem valer:
-   - posição final do ponteiro == soma exata dos deltas, qualquer que seja o padrão de entrega;
-   - nenhuma tecla fica presa ao fim da sessão, da troca de modo ou da queda de um canal;
-   - cada `EVENTS` aplicado exatamente uma vez e em ordem;
-   - nenhuma entrega em dobro entre agente e HID em nenhuma sequência de troca de modo.
-2. **Cripto**: replay, pacote adulterado, sessão errada, nonce repetido são rejeitados.
-3. **Integração no PC**: dois processos locais (PC simulado e "agente" em Python) por loopback.
-4. **No Mac**: teste manual guiado (compilar, conceder permissões, rodar `--observe`, depois o dual) com a telemetria como resultado.
+1. **PC protocol core with a network simulator** (loss, duplication, reordering, delay, burst loss, each channel, fixed seed): expected invariants:
+   - Final pointer position == exact sum of deltas, regardless of delivery pattern.
+   - No key remains stuck at session end, mode switch, or channel loss.
+   - Each `EVENTS` transition is applied exactly once and in order.
+   - No double delivery between agent and HID in any mode-switch sequence.
+2. **Crypto:** replay, tampered packet, wrong session, and repeated nonce are rejected.
+3. **PC integration:** two local processes (simulated PC and Python "agent") over loopback.
+4. **Mac:** guided manual test (compile, grant permissions, run `--observe`, then dual mode), with telemetry as the result.
 
-## 12. Questões em aberto
+## 12. Open questions
 
-- **RFCOMM × L2CAP com flush timeout** no canal B: RFCOMM é um fluxo confiável e pode formar fila quando o rádio está ruim. Um L2CAP com tempo de descarte se comportaria como datagrama (melhor para o mouse). Começar por RFCOMM (API mais simples no `IOBluetooth`) e reavaliar com a telemetria.
-- **Identidade de longo prazo** (Ed25519 fixada no 1º pareamento) para endurecer o handshake.
-- **Suspensão do Mac** (sleep/wake): reconexão do RFCOMM e novo handshake automáticos.
-- **Mais de um Mac** (hoje um host por vez).
-- **Mapa de teclas** completo HID usage → keycode do macOS, incluindo teclado ABNT2.
-- **Coexistência no rádio do Mac**: se a taxa adaptativa não bastar, avaliar piso mais baixo ou perfil "jogo/trabalho".
-- **Metas numéricas** (p99 de latência, teclas presas em N horas): não definidas; a telemetria da linha de base vai orientar.
+- **RFCOMM vs. L2CAP with flush timeout** on channel B: RFCOMM is a reliable stream and can queue when the radio is poor. L2CAP with discard timing would behave like a datagram (better for the mouse). Start with RFCOMM (simpler `IOBluetooth` API) and reconsider based on telemetry.
+- **Long-term identity** (pin Ed25519 at first pairing) to harden the handshake.
+- **Mac sleep/wake:** automatic RFCOMM reconnection and a new handshake.
+- **Multiple Macs:** currently one host at a time.
+- **Complete keyboard map:** HID usage → macOS keycode, including ABNT2.
+- **Mac radio coexistence:** if adaptive rate is insufficient, consider a lower floor or a "gaming/work" profile.
+- **Numerical targets** (p99 latency, stuck keys after N hours): not defined; baseline telemetry will guide them.
 
-## 13. Decisões já tomadas (resumo da entrevista)
+## 13. Decisions made (interview summary)
 
-Agente em Swift · BT com handshake, presença e reserva · 3 camadas com HID mudo · contadores cumulativos · UDP + ACK nas teclas · chave por sessão via BT · taxa do BT adaptativa com piso · A2DP continua no BT · projeto para pior cenário (Mac em 2,4 GHz) · telemetria embutida · gatilho do HID em ~4 s · entrega "tudo de uma vez", com o modo HID atual intacto atrás de uma chave.
+Swift agent · Bluetooth handshake, presence and backup · three layers with silent HID · cumulative counters · UDP + ACKs for keys · per-session key over Bluetooth · adaptive Bluetooth rate with a floor · A2DP remains on Bluetooth · design for the worst case (Mac on 2.4 GHz) · built-in telemetry · HID trigger at about 4 s · "all at once" delivery, with current HID mode intact behind a setting.
