@@ -1,6 +1,9 @@
-# btkvm dual — especificação do protocolo (rascunho v0.1)
+# btkvm dual — especificação do protocolo (implementação local v0.1)
 
-Status: **proposta**, ainda sem código. Resultado de uma entrevista de requisitos em 2026-10-05.
+Status: **implementação local em revisão**. Fontes do PC e do agente Swift existem;
+o agente ainda precisa ser compilado no macOS e os links/trocas de modo validados
+em um Mac real. Não foram executados testes funcionais ou simuladores nesta etapa.
+Resultado de uma entrevista de requisitos em 2026-10-05.
 O modo atual (HID puro) **não muda** e continua sendo o padrão.
 
 ## 1. Objetivo e princípios
@@ -82,6 +85,7 @@ Little-endian. Todos os canais usam o mesmo envelope; cada canal tem sua própri
 | `EVENTS` | 0x11 | PC→Mac (A e B) | transições de tecla/botão, confiáveis (§4.3) |
 | `EVENTS_ACK` | 0x12 | Mac→PC (A e B) | maior `ev_seq` aplicado + máscara dos seguintes |
 | `SNAPSHOT` | 0x13 | PC→Mac (A e B) | conjunto completo de teclas/botões pressionados (a cada ~100 ms) |
+| `SNAPSHOT_ACK` | 0x14 | Mac→PC (A e B) | confirma a referência inicial da nova época antes dos eventos |
 | `HB` | 0x20 | PC→Mac (A e B) | `t_pc_us`, `mode_epoch`, taxa BT atual |
 | `HB_ACK` | 0x21 | Mac→PC (A e B) | eco de `t_pc_us`, estatísticas de recepção por canal (§8) |
 | `MODE` | 0x30 | PC→Mac (A e B) | `hid_takeover` ou `agent_resume`, com `mode_epoch` novo |
@@ -104,12 +108,32 @@ sample_seq u32 | epoch u8 | x_total i32 | y_total i32 | wheel_total i32 | hwheel
 ### 4.3 `EVENTS` (confiável, ordenado, deduplicado)
 
 ```
-ev_seq u32 | epoch u8 | n u8 | n × { codigo u16, valor u8 (0/1), x_total i32, y_total i32 }
+ev_seq u32 | epoch u8 | n u8 | n × { codigo u16, valor u8 (0/1), x_total i32, y_total i32, sample_seq u32 }
 ```
 
 - Cobre teclas, teclas de mídia e botões do mouse. Cada evento leva a posição acumulada no momento, para o agente mover o ponteiro até lá **antes** de clicar.
 - O PC reenvia por A e B a cada 20 ms até receber `EVENTS_ACK` cobrindo o `ev_seq`; o agente aplica em ordem de `ev_seq` e descarta duplicados.
 - `SNAPSHOT` (a cada ~100 ms e a cada troca de modo) reenvia o conjunto completo de pressionadas. Se o agente achar que uma tecla está presa e o snapshot diz que não, solta; se o snapshot diz que está pressionada e o agente perdeu o evento, aplica.
+
+Na implementação, `codigo` é `(HID usage page << 8) | usage`: página 7 para
+teclado, 9 para botões e 12 para mídia. O `sample_seq` de cada transição permite
+posicionar um clique antes de restaurar uma amostra de mouse que tenha chegado
+adiantada. Movimento antigo não faz o ponteiro voltar após um evento mais recente.
+
+`EVENTS_ACK` = `base u32 | bitmap u64 | epoch u8`. O bitmap confirma os pacotes
+seguintes já retidos na janela; a aplicação continua ordenada pelo `base`.
+ACKs de outra época não removem eventos da fila atual. A fila tem 64 transições;
+se esgotar, o PC entra em HID e sincroniza o conjunto físico pressionado.
+
+`SNAPSHOT` = `epoch u8 | n u8 | bootstrap u8 | next_ev_seq u32 | MOUSE(25 B) |
+n × codigo u16`. O snapshot periódico só reconcilia o estado depois das
+transições anteriores a `next_ev_seq`; snapshots antigos são ignorados. O
+snapshot inicial (`bootstrap=1`) define os totais cumulativos sem mover o
+ponteiro, evitando reaplicar o movimento que já foi feito pelo HID.
+`SNAPSHOT_ACK` tem um único byte (`epoch`). O PC repete a referência inicial
+até esse ACK antes de liberar `MOUSE`/`EVENTS`.
+Sem essa confirmação por 3 segundos, a ativação volta ao HID mesmo que os
+heartbeats estejam respondendo.
 
 ## 5. Handshake e chaves (Bluetooth como autenticação invisível)
 
@@ -120,6 +144,18 @@ Acontece sozinho a cada ativação (Super+K de entrada), sem digitar nada:
 3. Ambos calculam `segredo = X25519(efêmera_própria, efêmera_remota)` e derivam duas chaves de tráfego (uma por direção) com `HKDF-SHA256(segredo, salt = nonce_pc ‖ nonce_mac, info = "btkvm/1")`.
 4. A LAN passa a ser aceita **somente** com pacotes que decifram com essa chave. Pacotes de intrusos na rede Wi-Fi são descartados na primeira checagem de tag.
 5. Nova sessão a cada ativação; rechaveamento também após 2³² pacotes ou 1 hora.
+
+Campos implementados em `HELLO`: `public_key[32] | nonce_pc[16] | udp_port u16 |
+new_session_id u32`. O cabeçalho do handshake continua com `session_id=0`.
+`ACCEPT`: `public_key[32] | nonce_mac[16] | count u8 | udp_port u16 |
+count × IPv4[4]`. Até oito endereços; zero permite usar apenas RFCOMM.
+O PC tenta os endereços anunciados e fixa o primeiro que devolver ACK com AEAD
+válido. IPv6 não está implementado nesta versão.
+
+O serviço RFCOMM usa UUID `8ea6e923-cc7d-4b58-93c5-72eb7376b8f1` e canal 22.
+BlueZ exige autenticação; `NewConnection` também verifica `Paired`, endereço do
+host HID registrado e `BT_SECURITY >= MEDIUM`. O Mac verifica o pareamento e o
+modo de criptografia antes de aceitar um `HELLO`.
 
 Autenticidade: o canal BT já está autenticado e criptografado pelo pareamento Bluetooth, e as chaves efêmeras viajam dentro dele. Nada de longo prazo é guardado em disco nesta versão.
 
@@ -143,6 +179,13 @@ Autenticidade: o canal BT já está autenticado e criptografado pelo pareamento 
 - **Gatilho:** nenhum `HB_ACK` autenticado válido, em **nenhum** dos dois canais, por **4 s**. Silêncio é falta de resposta do agente (heartbeat ~10 Hz por canal), não ociosidade do usuário.
 - Ao disparar: o PC incrementa `mode_epoch`, envia `MODE{hid_takeover}` (melhor esforço), solta todas as teclas do caminho do agente e liga o HID.
 - **Retorno:** ao receber `HB_ACK` válidos por ≥ 1 s contínuo, o PC envia `MODE{agent_resume}`, espera `MODE_ACK`, desliga o HID (todas as teclas soltas) e volta ao modo agente.
+- `agent_resume` prepara o agente, mas ainda não injeta. Após `MODE_ACK`, o PC
+  esvazia os relatórios de soltura do HID e entrega o snapshot inicial; somente
+  então o agente permite a injeção. A negociação inicial usa a mesma confirmação.
+- `MODE` é repetido a cada 100 ms até `MODE_ACK`; heartbeats com época mais nova
+  também fazem o agente soltar a época anterior. Entrada enfileirada de outra
+  época não é enviada. A ausência de conexão HID devolve a entrada ao PC antes
+  de iniciar uma tentativa de reconexão, que pode bloquear no Bluetooth.
 - **Regra do escritor único:** no modo HID o PC **para** de enviar `MOUSE`/`EVENTS` ao agente (só `HB`/`MODE`), então mesmo que o agente esteja vivo e só os ACKs tenham se perdido, não há movimento em dobro.
 - **Vigia no agente:** se o agente ficar > 2 s sem pacote autenticado do PC, solta todas as teclas e botões que ele mesmo pressionou.
 - Quando o macOS está na tela de login/bloqueio, o agente de usuário não injeta; o HID cobre esse caso.
@@ -161,6 +204,12 @@ Medida nos dois lados e devolvida no `HB_ACK`:
 | banda e RSSI do Wi-Fi, estado do Bluetooth | Mac (informativo) |
 
 - Resumo a cada 5 s no `journalctl -u btkvm` e comando `btkvm-stats`.
+- `HB_ACK` = `t_pc_us u32 | epoch u8 | received u32 | lost u32 | duplicates u32 |
+  out_of_order u32`, reportando o canal em que chegou o HB. Contadores cumulativos
+  são comparados em uma janela de 1 segundo para a adaptação. RSSI/banda do Wi-Fi
+  são informativos no log do Mac quando o sistema permite consultá-los.
+- `/run/btkvm-dual.json` recebe o último resumo; `btkvm-stats` marca relatórios
+  com mais de 15 segundos como antigos. Taxas nominais não são latência medida.
 - **Linha de base do HID atual:** o agente tem um modo `--observe` (somente escuta, sem injetar, com permissão de Monitoramento de Entrada) que registra o intervalo entre eventos chegando pelo HID. Mostra jitter e engasgos do modo atual para comparar com o dual. Ressalva: o HID não tem RTT; a comparação é por regularidade de chegada e pela contagem "adiados por buffer cheio" que o `btkvm` já registra.
 
 ## 9. Agente do Mac (`btkvm-agent`, Swift, binário único)
@@ -175,13 +224,16 @@ Medida nos dois lados e devolvida no `HB_ACK`:
 
 ## 10. Organização do código
 
-- `src/btkvm`: **inalterado** no caminho HID. Novo modo selecionado em `/etc/btkvm.conf` (`modo = hid` padrão, `dual`).
+- `src/btkvm`: integração opcional, preservando o caminho HID padrão. Novo modo selecionado em `/etc/btkvm.conf` (`modo = hid` padrão, `dual`).
 - Núcleo do protocolo como módulo puro e testável (sem I/O): serialização, AEAD, dedup, contadores, máquina de estados, adaptação de taxa.
 - Transportes separados: LAN (UDP) e BT (RFCOMM via `ProfileManager1` do BlueZ, que o `btkvm` já usa).
 - `mac-agent/`: pacote Swift com o agente.
 - Instalador: opção `--dual`; sem ela nada muda.
 
 ## 11. Testes
+
+Plano de validação futuro. Esta etapa apenas conferiu sintaxe Python/Bash;
+as propriedades abaixo ainda não foram demonstradas em simulador ou hardware.
 
 1. **Núcleo, no PC, com simulador de rede** (perda, duplicação, reordenação, atraso, rajada, em cada canal, com semente fixa): propriedades que sempre devem valer:
    - posição final do ponteiro == soma exata dos deltas, qualquer que seja o padrão de entrega;

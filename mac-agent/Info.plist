@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>io.github.eduardoruisjbv.btkvm-agent</string>
+<key>CFBundleName</key><string>btkvm-agent</string>
+<key>CFBundleExecutable</key><string>btkvm-agent</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSUIElement</key><true/>
+<key>LSMinimumSystemVersion</key><string>11.0</string>
+<key>NSBluetoothAlwaysUsageDescription</key><string>Receber teclado e mouse do PC pareado pelo btkvm.</string>
+<key>NSBluetoothPeripheralUsageDescription</key><string>Conectar ao serviço Bluetooth do PC pareado.</string>
+<key>NSLocalNetworkUsageDescription</key><string>Receber a ligação LAN criptografada do PC pareado.</string>
+<key>NSLocationUsageDescription</key><string>Mostrar informações opcionais do Wi-Fi na telemetria local.</string>
+</dict></plist>

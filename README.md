@@ -51,6 +51,48 @@ O instalador pede a senha uma vez (via `pkexec`, ou `sudo` sem ambiente gráfico
 
 O endereço do Mac é gravado na primeira conexão em `/var/lib/btkvm/host`.
 
+## Modo dual opcional (LAN + Bluetooth)
+
+O modo HID acima continua sendo o padrão. O modo dual adiciona um agente no Mac,
+UDP pela LAN e um serviço RFCOMM próprio no Bluetooth. Os eventos usam chaves
+efêmeras por sessão (X25519/HKDF + ChaCha20-Poly1305), contadores cumulativos do
+mouse, teclas ordenadas com ACK e snapshots. O áudio continua no A2DP.
+
+```bash
+sudo dnf install python3-cryptography
+./install.sh --dual
+```
+
+O instalador escreve `/etc/btkvm.conf` com `modo = dual` e porta UDP `45873`.
+Libere essa porta no firewall do PC para o endereço/rede do Mac. O handshake
+anuncia os endereços automaticamente; não é preciso configurar o IP no agente.
+IPv4 é suportado nesta versão. Se a LAN estiver indisponível, o RFCOMM continua
+como caminho do agente.
+
+Compile e instale as fontes de [mac-agent/](mac-agent/README.md) no Mac e conceda
+Acessibilidade, Bluetooth e Rede local. O agente só aceita o PC pareado; o PC
+só aceita RFCOMM criptografado do Mac já registrado pelo HID. Faça o pareamento
+HID normal antes de instalar o agente.
+
+Super+K negocia por até 3 segundos. Sem agente pronto, usa o HID já conectado.
+Se não houver conexão HID, devolve a entrada ao PC antes de tentar reconectar.
+No modo agente, 4 segundos sem ACK autenticado causam a queda para HID. O retorno
+espera 1 segundo de ACKs estáveis e a confirmação do novo estado. No Mac, o
+watchdog solta as teclas após 2 segundos sem mensagens autenticadas.
+
+```bash
+btkvm-stats                 # relatório JSON atualizado a cada 5s
+journalctl -u btkvm -f
+```
+
+Para voltar ao modo original, defina `modo = hid` em `/etc/btkvm.conf` e reinicie
+o serviço. Veja o formato dos pacotes e as decisões em [docs/PROTOCOLO.md](docs/PROTOCOLO.md).
+
+**Estado desta implementação:** fontes locais do PC e Mac adicionadas; sintaxe
+Python/Bash conferida. O agente Swift ainda não foi compilado no macOS nem os
+transportes, permissões, teclas ABNT2, trocas de modo e coexistência com A2DP foram
+validados em um Mac real. As taxas são limites de envio, não medições de desempenho.
+
 ## Áudio do Mac no PC
 
 O PC já é um receptor A2DP pelo BlueZ + PipeWire. Depois de parear:

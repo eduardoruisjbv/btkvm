@@ -7,6 +7,13 @@ if [ "${1:-}" = "--root" ]; then
   systemctl disable --now btkvm.service 2>/dev/null || true
   rm -f /etc/systemd/system/btkvm.service /etc/systemd/system/bluetooth.service.d/btkvm.conf
   rm -f /usr/local/bin/btkvm /usr/local/bin/btkvm-parear /usr/local/bin/btkvm-audio
+  rm -f /usr/local/bin/btkvm-stats /run/btkvm-dual.json /run/btkvm-dual.json.tmp
+  rm -rf /usr/local/lib/btkvm
+  if [ -f /etc/btkvm.conf.bak-btkvm ]; then
+    mv /etc/btkvm.conf.bak-btkvm /etc/btkvm.conf
+  else
+    rm -f /etc/btkvm.conf
+  fi
   [ -f /etc/bluetooth/main.conf.bak-btkvm ] && mv /etc/bluetooth/main.conf.bak-btkvm /etc/bluetooth/main.conf
   systemctl daemon-reload
   systemctl restart bluetooth

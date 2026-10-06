@@ -15,6 +15,7 @@ import select
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 
@@ -166,7 +167,7 @@ class Perfil(dbus.service.Object):
         pass
 
 
-def registrar_perfil():
+def registrar_perfil(dual=None):
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     barramento = dbus.SystemBus()
     perfil = Perfil(barramento, "/org/btkvm/perfil")
@@ -175,6 +176,10 @@ def registrar_perfil():
         "ServiceRecord": REGISTRO_SDP, "Role": "server",
         "RequireAuthentication": True, "RequireAuthorization": False,
     })
+    if dual:
+        from btkvm_dual.bluez import register
+        # Hold exported D-Bus objects for the daemon lifetime.
+        registrar_perfil.dual_profile = register(barramento, gerente, dual, ARQ_HOST, log)
     threading.Thread(target=GLib.MainLoop().run, daemon=True).start()
     log("perfil HID registrado no BlueZ")
 
@@ -252,7 +257,14 @@ class LinkHCI:
 
 # ------------------------------------------------------------------ o serviço
 class KVM:
-    def __init__(self):
+    def __init__(self, dual=None):
+        self.dual = dual
+        self.dual_mode = "INACTIVE"
+        self.dual_epoch = 0
+        self.dual_ready = False
+        self.dual_pending = False
+        self.dual_totals = [0, 0, 0, 0]
+        self.dual_sample = 0
         self.dispositivos = {}  # fd -> InputDevice
         self.ultima_varredura = 0
         self.pressionadas = set()
@@ -269,6 +281,12 @@ class KVM:
         self.ouvir_intr = self._ouvir(PSM_INTR)
         self.hci = LinkHCI()
         self.host = None
+        if dual:
+            try:
+                with open(ARQ_HOST) as source:
+                    self.host = source.read().strip() or None
+            except OSError:
+                pass
         self.envios = self.cheios = 0  # estatística do mouse, vai para o log
         self.ultima_estatistica = 0.0
 
@@ -322,6 +340,8 @@ class KVM:
             except OSError:
                 pass
             self.pressionadas = set()
+            if self.dual and self.ativo:
+                self.desativar("Dispositivo removido — entrada no PC")
 
     # ---- conexão Bluetooth
     @property
@@ -338,7 +358,7 @@ class KVM:
         self.ctrl = self.intr = None
         self.fila.clear()
         log(f"desconectado: {motivo}")
-        if self.ativo:
+        if self.ativo and (not self.dual or self.dual_mode != "AGENT"):
             self.desativar("Mac desconectou — teclado e mouse de volta no PC")
 
     def conectar(self):
@@ -498,6 +518,9 @@ class KVM:
 
     # ---- alternância
     def ativar(self):
+        if self.dual:
+            self.esperando_soltar = True
+            return
         if not self.conectado and not self.conectar():
             return
         # só agarra depois que Super e K forem soltos, senão o GNOME fica com o Super "preso"
@@ -510,22 +533,108 @@ class KVM:
         for d in self.dispositivos.values():
             self._agarrar(d)
         self.zerar_mac()
+        if self.dual:
+            self.dual_ready = self.dual_pending = False
+            self.dual_totals = [0, 0, 0, 0]
+            self.dual_sample = 0
+            self.dual_mode = "NEGOTIATING"
+            self.dual.activate()
         if self.host:
             self.hci.sem_sniff(self.host, True)
         avisar("Teclado e mouse no Mac")
         log("ativo: entrada indo para o Mac")
 
     def desativar(self, msg="Teclado e mouse de volta no PC"):
+        if self.dual:
+            self.dual.deactivate()
+            self.dual_mode = "INACTIVE"
+            self.dual_ready = self.dual_pending = False
         self.zerar_mac()
         self.ativo = False
         self.esperando_soltar = False
         for d in self.dispositivos.values():
             self._soltar(d)
         self.pressionadas = set()
-        if self.host and self.conectado:
+        if self.host and (self.conectado or self.dual):
             self.hci.sem_sniff(self.host, False)
         avisar(msg)
         log("inativo: entrada no PC")
+
+    # ---- modo dual (opt-in): o caminho HID acima continua sendo o padrão
+    def _dual_usage(self, codigo):
+        if codigo in MODIFICADORES:
+            return 0x0700 | (0xE0 + MODIFICADORES[codigo].bit_length() - 1)
+        if codigo in TECLAS:
+            return 0x0700 | TECLAS[codigo]
+        if codigo in MIDIA:
+            return 0x0C00 | MIDIA[codigo]
+        if codigo in BOTOES:
+            return 0x0900 | BOTOES[codigo].bit_length()
+        return None
+
+    def _dual_mouse(self):
+        from btkvm_dual.protocol import MouseState, monotonic_us
+        return MouseState(self.dual_sample, self.dual_epoch, *self.dual_totals, monotonic_us())
+
+    def _dual_notices(self):
+        for notice in self.dual.drain_notices():
+            if notice.kind == "fatal":
+                log(f"dual: falha do runtime: {notice.value}")
+                self.desativar("Modo dual falhou — entrada no PC")
+            elif notice.kind == "mode":
+                change = notice.value
+                log(f"dual: {change.old.name} → {change.new.name}, época {change.epoch}: {change.reason}")
+                if not self.ativo:
+                    continue
+                self.dual_epoch = change.epoch
+                self.dual_ready = self.dual_pending = False
+                self.dual_mode = change.new.name
+                if change.new.name == "AGENT":
+                    # Releases must drain before ready(): the Mac waits for the
+                    # resulting SNAPSHOT before enabling its agent writer.
+                    self.zerar_mac()
+                    self.dual_pending = True
+                elif change.new.name == "HID":
+                    if not self.conectado:
+                        # Restore PC input before a potentially slow HID connect.
+                        self.desativar("Agente indisponível — conectando o HID")
+                        if self.conectar():
+                            avisar("HID conectado — pressione Super+K para tentar novamente")
+                        continue
+                    self.zerar_mac()
+                    self.botoes = sum(BOTOES[c] for c in self.pressionadas if c in BOTOES)
+                    self.enviar_teclado()
+                    self.enviar_mouse(importante=True)
+                    media = next((MIDIA[c] for c in self.pressionadas if c in MIDIA), 0)
+                    self.enviar(struct.pack("<BH", 3, media))
+                    avisar("Teclado e mouse no Mac via HID")
+            elif notice.kind == "telemetry":
+                log("dual 5s: " + str(notice.value))
+            elif notice.kind in ("link_lost", "session_ready"):
+                log(f"dual: {notice.kind}: {notice.value}")
+        if self.dual_pending and not self.fila and self.ativo:
+            usages = {self._dual_usage(c) for c in self.pressionadas}
+            usages.discard(None)
+            self.dual.ready(self.dual_epoch, usages, self._dual_mouse())
+            self.dual_pending = False
+            self.dual_ready = True
+            avisar("Teclado e mouse no Mac via LAN + Bluetooth")
+
+    def _dual_relative(self, ev, disp):
+        index = {e.REL_X: 0, e.REL_Y: 1, e.REL_WHEEL_HI_RES: 2,
+                 e.REL_HWHEEL_HI_RES: 3, e.REL_WHEEL: 2, e.REL_HWHEEL: 3}.get(ev.code)
+        if index is None:
+            return
+        value = ev.value
+        if ev.code in (e.REL_WHEEL, e.REL_HWHEEL):
+            high = e.REL_WHEEL_HI_RES if ev.code == e.REL_WHEEL else e.REL_HWHEEL_HI_RES
+            if disp is not None and high in disp.capabilities().get(e.EV_REL, []):
+                return
+            value *= 120
+        self.dual_totals[index] = ((self.dual_totals[index] + value + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+        self.dual_sample = (self.dual_sample + 1) & 0xFFFFFFFF
+        if self.dual_mode == "AGENT" and self.dual_ready:
+            self.dual.send_mouse(self._dual_mouse())
 
     def evento(self, ev, disp=None):
         if ev.type == e.EV_KEY:
@@ -546,6 +655,14 @@ class KVM:
                 return
             if not self.ativo:
                 return
+            if self.dual and self.dual_mode != "HID":
+                if self.dual_mode == "AGENT" and self.dual_ready:
+                    usage = self._dual_usage(codigo)
+                    if usage is not None:
+                        from btkvm_dual.protocol import KeyTransition
+                        self.dual.send_transition(self.dual_epoch, KeyTransition(
+                            usage, bool(valor), *self.dual_totals[:2], self.dual_sample))
+                return
             if codigo in BOTOES:
                 if valor:
                     self.botoes |= BOTOES[codigo]
@@ -557,6 +674,10 @@ class KVM:
             elif codigo in MODIFICADORES or codigo in TECLAS:
                 self.enviar_teclado()
         elif ev.type == e.EV_REL and self.ativo:
+            if self.dual:
+                self._dual_relative(ev, disp)
+                if self.dual_mode != "HID":
+                    return
             if ev.code == e.REL_X:
                 self.dx += ev.value
             elif ev.code == e.REL_Y:
@@ -590,6 +711,8 @@ class KVM:
     def rodar(self):
         self.varrer()
         while True:
+            if self.dual:
+                self._dual_notices()
             leitura = [self.ouvir_ctrl, self.ouvir_intr, self.hci.sock] + list(self.dispositivos)
             leitura += [s for s in (self.ctrl, self.intr) if s]
             espera = 1.0
@@ -599,6 +722,8 @@ class KVM:
                 espera = max(0.0, self.ultimo_mouse + MOUSE_INTERVALO - time.monotonic())
             elif self.esperando_soltar:
                 espera = 0.02
+            if self.dual:
+                espera = min(espera, 0.004)
             prontos, _, _ = select.select(leitura, [], [], espera)
 
             for obj in prontos:
@@ -633,5 +758,23 @@ class KVM:
 
 
 if __name__ == "__main__":
-    registrar_perfil()
-    KVM().rodar()
+    # Local source runs import from src/; installed runs import this private lib.
+    if not os.path.isdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "btkvm_dual")):
+        sys.path.insert(0, "/usr/local/lib/btkvm")
+    dual = None
+    config_path = os.environ.get("BTKVM_CONFIG", "/etc/btkvm.conf")
+    if os.path.exists(config_path):
+        from btkvm_dual.config import load
+        config = load(config_path)
+        if config["modo"] == "dual":
+            from btkvm_dual.protocol import create_ephemeral_keypair
+            from btkvm_dual.runtime import DualRuntime
+            create_ephemeral_keypair()  # fail before grabbing input if dependency is absent
+            dual = DualRuntime(config["udp_host"], config["udp_port"])
+            dual.start()
+    try:
+        registrar_perfil(dual)
+        KVM(dual).rodar()
+    finally:
+        if dual:
+            dual.close()

@@ -1,0 +1,4 @@
+# Ausência deste arquivo usa o HID original.
+modo = dual
+udp_host = 0.0.0.0
+udp_port = 45873
