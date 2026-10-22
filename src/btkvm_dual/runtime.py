@@ -265,6 +265,10 @@ class DualRuntime:
             nonlocal lan_degraded, lan_healthy_since, bt_rate
             nonlocal agent_started, bootstrap_payload
             if channel == Channel.BLUETOOTH and negotiating:
+                # A rekey reuses the RFCOMM stream, so frames the Mac encrypted
+                # under the previous session may still precede ACCEPT.
+                if struct.unpack_from("<I", packet, 4)[0] != 0:
+                    return
                 kind, data = unpack_handshake(packet)
                 if kind != MessageType.ACCEPT or private is None:
                     raise ProtocolError("expected ACCEPT")
