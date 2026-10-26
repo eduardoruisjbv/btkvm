@@ -5,7 +5,16 @@ Based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic V
 ## [Unreleased]
 
 ### Added
-- No code yet; the current HID mode remains unchanged.
+- No unreleased changes.
+
+## [0.4.0] - 2026-10-26
+
+### Added
+- Optional dual KVM mode over LAN with a Bluetooth RFCOMM fallback and a companion Mac agent.
+
+### Fixed
+- `btkvm-audio` now trusts the paired BTKVM host before reconnecting its A2DP audio profile. This restores audio after pairing again when BlueZ has not marked the device trusted.
+- Bluetooth rekey negotiation ignores stale frames from the previous session.
 
 ## [0.3.1] - 2026-10-05
 

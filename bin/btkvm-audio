@@ -6,7 +6,7 @@
 # Without an argument, uses the Mac registered by btkvm in /var/lib/btkvm/host.
 set -euo pipefail
 
-A2DP_SINK_UUID="0000110a-0000-1000-8000-00805f9b34fb"
+A2DP_SOURCE_UUID="0000110a-0000-1000-8000-00805f9b34fb"
 host="${1:-$(cat /var/lib/btkvm/host 2>/dev/null || true)}"
 
 if [ -z "$host" ]; then
@@ -14,4 +14,23 @@ if [ -z "$host" ]; then
   exit 1
 fi
 
-bluetoothctl connect "$host" "$A2DP_SINK_UUID"
+if [[ ! "$host" =~ ^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$ ]]; then
+  echo "Invalid Bluetooth address: $host" >&2
+  exit 1
+fi
+
+trust_host() {
+  local address="$1"
+  local info
+
+  info="$(bluetoothctl info "$address" 2>/dev/null || true)"
+  if ! grep -Eq '^[[:space:]]*Paired: yes$' <<<"$info"; then
+    echo "Device $address is not paired. Pair it first with btkvm-parear." >&2
+    exit 1
+  fi
+
+  bluetoothctl trust "$address"
+}
+
+trust_host "$host"
+bluetoothctl connect "$host" "$A2DP_SOURCE_UUID"

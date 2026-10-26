@@ -1,0 +1,146 @@
+{
+  "bin/btkvm-audio": {
+    "mtime": 1793046239.6505785,
+    "seen": 1793046260.6888971,
+    "ast_hash": "0dc20cf9f77c6d36f124901374e95543",
+    "semantic_hash": ""
+  },
+  "bin/btkvm-iniciar": {
+    "mtime": 1792956868.4477055,
+    "seen": 1793046260.6889024,
+    "ast_hash": "4f7d479c36da5be6510ee7b4d6a0ba63",
+    "semantic_hash": ""
+  },
+  "bin/btkvm-parear": {
+    "mtime": 1792956868.4477055,
+    "seen": 1793046260.688905,
+    "ast_hash": "4eb44fb59551b6baad9e0f8081c08ce6",
+    "semantic_hash": ""
+  },
+  "bin/btkvm-stats": {
+    "mtime": 1792956868.4477055,
+    "seen": 1793046260.6889067,
+    "ast_hash": "8704ec7256462ff31410fa7e0b4ffc83",
+    "semantic_hash": ""
+  },
+  "install.sh": {
+    "mtime": 1792956868.4484649,
+    "seen": 1793046260.688908,
+    "ast_hash": "b9160d22135ccd2f1d424a3c45f7827a",
+    "semantic_hash": ""
+  },
+  "mac-agent/Sources/Agent.swift": {
+    "mtime": 1792956868.4486976,
+    "seen": 1793046260.688909,
+    "ast_hash": "a22d49c08bdbd65e3b39b448f704e583",
+    "semantic_hash": ""
+  },
+  "mac-agent/Sources/Input.swift": {
+    "mtime": 1792956868.4488418,
+    "seen": 1793046260.6889105,
+    "ast_hash": "26b6f0ab1c7885bb1dfbbbe24984ca2c",
+    "semantic_hash": ""
+  },
+  "mac-agent/Sources/Protocol.swift": {
+    "mtime": 1792956868.4488418,
+    "seen": 1793046260.6889117,
+    "ast_hash": "e9441c901eb708b5495e32f9e58e612c",
+    "semantic_hash": ""
+  },
+  "mac-agent/Sources/main.swift": {
+    "mtime": 1792956868.4488418,
+    "seen": 1793046260.6889129,
+    "ast_hash": "c796db261552932cc3710a9c29bf20dc",
+    "semantic_hash": ""
+  },
+  "mac-agent/build.sh": {
+    "mtime": 1792956868.4488418,
+    "seen": 1793046260.6889138,
+    "ast_hash": "66e76cbcbbe31c2b1533f7cac49b3867",
+    "semantic_hash": ""
+  },
+  "mac-agent/install.sh": {
+    "mtime": 1792956868.4488418,
+    "seen": 1793046260.688915,
+    "ast_hash": "5ef32a86ffb4e2dd02e971770ec27029",
+    "semantic_hash": ""
+  },
+  "mac-agent/uninstall.sh": {
+    "mtime": 1792956868.4488418,
+    "seen": 1793046260.6889162,
+    "ast_hash": "51e3ce154061dd1c0565c744928ed7ab",
+    "semantic_hash": ""
+  },
+  "src/btkvm": {
+    "mtime": 1792956868.4488418,
+    "seen": 1793046260.6889174,
+    "ast_hash": "22bee06853989175a5f188f088690efe",
+    "semantic_hash": ""
+  },
+  "src/btkvm_dual/__init__.py": {
+    "mtime": 1792956868.4492414,
+    "seen": 1793046260.6889186,
+    "ast_hash": "b70281cd56e3f4a2f9bb6add698113a9",
+    "semantic_hash": ""
+  },
+  "src/btkvm_dual/bluez.py": {
+    "mtime": 1792956868.4492962,
+    "seen": 1793046260.6889195,
+    "ast_hash": "a23acd6b740929c4aa7e34a3b97f2915",
+    "semantic_hash": ""
+  },
+  "src/btkvm_dual/config.py": {
+    "mtime": 1792956868.4492962,
+    "seen": 1793046260.6889205,
+    "ast_hash": "e6a0e02fccebc55a6bdc08c2bd22559a",
+    "semantic_hash": ""
+  },
+  "src/btkvm_dual/protocol.py": {
+    "mtime": 1792956868.4492962,
+    "seen": 1793046260.688922,
+    "ast_hash": "1f466e7ef605987e58841cff14fde5e4",
+    "semantic_hash": ""
+  },
+  "src/btkvm_dual/runtime.py": {
+    "mtime": 1792956868.4492962,
+    "seen": 1793046260.688923,
+    "ast_hash": "3adf197aefd03c0ad2324c8f9cc18ae3",
+    "semantic_hash": ""
+  },
+  "src/btkvm_dual/state.py": {
+    "mtime": 1792956868.4492962,
+    "seen": 1793046260.6889238,
+    "ast_hash": "cb305d6b15ca012c0b930f3db857757a",
+    "semantic_hash": ""
+  },
+  "uninstall.sh": {
+    "mtime": 1792956868.4496214,
+    "seen": 1793046260.688925,
+    "ast_hash": "558b6456fe4ec4a2d15f39f2ae295d26",
+    "semantic_hash": ""
+  },
+  "CHANGELOG.md": {
+    "mtime": 1793046239.6505785,
+    "seen": 1793046260.688926,
+    "ast_hash": "f40e72c3abd989277c22237aca745b76",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1793046239.6505785,
+    "seen": 1793046260.688927,
+    "ast_hash": "ea80980b74787e62b73dce592cea0499",
+    "semantic_hash": ""
+  },
+  "docs/PROTOCOLO.md": {
+    "mtime": 1792956868.4477055,
+    "seen": 1793046260.6889284,
+    "ast_hash": "5e2adcf2ac32a661d269a9b0bea1ed69",
+    "semantic_hash": ""
+  },
+  "mac-agent/README.md": {
+    "mtime": 1792956868.4486976,
+    "seen": 1793046260.6889293,
+    "ast_hash": "b75585e6ba59cec3a5c5104f01fcf773",
+    "semantic_hash": ""
+  }
+}

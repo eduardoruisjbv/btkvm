@@ -1,0 +1,22 @@
+{
+  "0": ".receive",
+  "1": "runtime.py",
+  "2": "DualRuntime",
+  "3": "KVM",
+  "4": "btkvm dual — protocol specification (local implementation v0.1)",
+  "5": "Agent",
+  "6": "ReliableEventQueue",
+  "7": "Changelog",
+  "8": "Agent.swift",
+  "9": "ModeMachine",
+  "10": "WireError",
+  "11": "ReplayWindow",
+  "12": "Perfil",
+  "13": "build.sh script",
+  "14": "btkvm-audio",
+  "15": "btkvm-iniciar",
+  "16": "btkvm-parear",
+  "17": "install.sh",
+  "18": "mac-agent/uninstall.sh",
+  "19": "uninstall.sh"
+}

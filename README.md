@@ -80,7 +80,7 @@ To return to the original mode, set `mode = hid` in `/etc/btkvm.conf` and restar
 The PC is already an A2DP receiver through BlueZ and PipeWire. After pairing:
 
 - On the Mac, open the sound output selector (**Control Center → Sound**) and choose the PC (**Bluetooth**). Mac audio plays through the PC's speakers or headphones.
-- If the Bluetooth option disappears on the Mac, run `btkvm-audio` on the PC. It connects the audio profile to the registered Mac.
+- If the Bluetooth option disappears on the Mac, run `btkvm-audio` on the PC. It trusts the paired host saved by BTKVM and reconnects its A2DP audio profile. You can pass a different paired device address as an argument.
 
 ### Optional: AirPlay (`shairport-sync`)
 
