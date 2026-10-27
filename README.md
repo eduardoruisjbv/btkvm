@@ -2,14 +2,14 @@
 
 **One keyboard and mouse for two computers, wirelessly, with no software on the Mac.**
 
-The Linux PC presents itself to the Mac as a Bluetooth keyboard and mouse. Press **Super+K** to switch the PC keyboard and mouse to the Mac; press it again to switch them back to the PC. The PC can also act as the Mac's **Bluetooth audio receiver** (A2DP sink), so Mac audio plays through the PC's speakers or headphones.
+The Linux PC presents itself to the Mac as a Bluetooth keyboard and mouse. Press **Super+K** to switch the PC keyboard and mouse to the Mac; press it again to switch them back to the PC. The PC can also receive Bluetooth audio (A2DP) from a Mac or phone and play it through the PC's speakers or headphones.
 
 - Nothing to install on the Mac: it sees an ordinary Bluetooth keyboard and mouse.
 - No switching desktops by moving the pointer across a screen edge (useful when gaming on the PC).
 - Scrolling, mouse buttons, media keys, and horizontal scrolling work.
 - If the Mac disconnects while KVM is active, keyboard and mouse input automatically returns to the PC.
 
-> Tested on Nobara 44 (Fedora, GNOME Wayland, PipeWire, BlueZ 5.8x) with a Realtek RTL8821CE adapter and a MacBook. It should work on any BlueZ distribution, but only this setup has been verified.
+> Tested by the maintainer on Arch Linux, CachyOS, Fedora, Bazzite, Ubuntu, and Debian with the same Realtek RTL8821CE adapter and a 2017 MacBook Pro.
 
 ## How it works
 
@@ -78,6 +78,8 @@ To return to the original mode, set `mode = hid` in `/etc/btkvm.conf` and restar
 ## Mac audio on the PC
 
 The PC is already an A2DP receiver through BlueZ and PipeWire. After pairing:
+
+> Bluetooth audio reception was also tested successfully with an iPhone 12 mini, an iPhone 16, and a Xiaomi Mi 9T Pro.
 
 - On the Mac, open the sound output selector (**Control Center → Sound**) and choose the PC (**Bluetooth**). Mac audio plays through the PC's speakers or headphones.
 - If the Bluetooth option disappears on the Mac, run `btkvm-audio` on the PC. It trusts the paired host saved by BTKVM and reconnects its A2DP audio profile. You can pass a different paired device address as an argument.
