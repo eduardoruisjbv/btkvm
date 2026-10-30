@@ -11,6 +11,19 @@ The Linux PC presents itself to the Mac as a Bluetooth keyboard and mouse. Press
 
 > Tested on Nobara 44 (Fedora, GNOME Wayland, PipeWire, BlueZ 5.8x) with a Realtek RTL8821CE adapter and a MacBook. It should work on any BlueZ distribution, but only this setup has been verified.
 
+## Input and audio flow
+
+```mermaid
+flowchart LR
+ A[PC keyboard & mouse] --> B[Linux btkvm service]
+ B --> C[Bluetooth HID over L2CAP]
+ C --> D[Mac sees keyboard & mouse]
+ E[Super+K] --> B
+ D -->|disconnect: restore local input| A
+ F[Mac audio] --> G[Bluetooth A2DP sink on PC]
+ G --> H[PC speakers or headphones]
+```
+
 ## How it works
 
 | Component | Purpose |
